@@ -1,0 +1,189 @@
+name: Build and Publish Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      vllm_commit:
+        description: "vLLM git ref to build against (tag, branch, or sha)"
+        type: string
+        default: "v0.20.0"
+      vllm_omni_commit:
+        description: "vllm-omni git ref"
+        type: string
+        default: "v0.20.0rc1"
+      publish:
+        description: "Publish to GHCR (only for repo maintainers)"
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: ghcr.io
+  REPO: ${{ github.repository }}
+
+jobs:
+  # ─── vLLM base image ───────────────────────────────────────────────
+  build-vllm:
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          VLLM_VER="${{ github.event.inputs.vllm_commit || 'v0.20.0' }}"
+          DT=$(date +%Y%m%d%H%M%S)
+
+          # Image name: rocm_gfx1151_<software>_<version>
+          # Tag: <date+time>
+          TAGS="${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${DT}"
+
+          # Also tag with branch name for easy reference
+          if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}"
+          fi
+
+          # Tag pushes also get the semver tag
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm_${TAG}:${DT}"
+          fi
+
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Publishing tags:"
+          echo "${TAGS}" | tr ',' '\n'
+
+      - name: Build and push vLLM image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./vllm
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.description=vLLM v0.20.0 for AMD gfx1151 (Strix Halo) with ROCm 7.13 nightly
+          build-args: |
+            VLLM_COMMIT=${{ github.event.inputs.vllm_commit || 'v0.20.0' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ─── vLLM-Omni image (depends on vLLM builder) ─────────────────────
+  build-vllm-omni:
+    runs-on: ubuntu-24.04
+    needs: build-vllm
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          OMNI_VER="${{ github.event.inputs.vllm_omni_commit || 'v0.20.0rc1' }}"
+          VLLM_VER="${{ github.event.inputs.vllm_commit || 'v0.20.0' }}"
+          DT=$(date +%Y%m%d%H%M%S)
+
+          TAGS="${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${DT}"
+
+          if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${BRANCH}"
+          fi
+
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${TAG}:${DT}"
+          fi
+
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "Publishing tags:"
+          echo "${TAGS}" | tr ',' '\n'
+
+      - name: Compute base image
+        id: base
+        run: |
+          VLLM_VER="${{ github.event.inputs.vllm_commit || 'v0.20.0' }}"
+          if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH="${GITHUB_REF#refs/heads/}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            BRANCH="${GITHUB_REF#refs/tags/}"
+          else
+            BRANCH="main"
+          fi
+          echo "image=${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push vLLM-Omni image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./vllm-omni
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.description=vllm-omni v0.20.0rc1 for AMD gfx1151 (Strix Halo) with ROCm 7.13 nightly
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+            VLLM_OMNI_COMMIT=${{ github.event.inputs.vllm_omni_commit || 'v0.20.0rc1' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ─── Usage note ────────────────────────────────────────────────────
+  usage-note:
+    runs-on: ubuntu-24.04
+    needs: [build-vllm, build-vllm-omni]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Print usage
+        run: |
+          echo "### Images published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Builds vLLM v0.20.0 + vllm-omni v0.20.0rc1 from source with ROCm 7.13 nightly + gfx1151 patches." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### vLLM (text LLM + ASR)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/rocm_gfx1151_vllm_v0.20.0:20260502143025" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### vLLM-Omni (any-to-any multimodal)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/rocm_gfx1151_vllm-omni_v0.20.0rc1:20260502143025" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
