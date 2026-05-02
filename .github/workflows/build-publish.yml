@@ -58,18 +58,18 @@ jobs:
 
           # Image name: rocm_gfx1151_<software>_<version>
           # Tag: <date+time>
-          TAGS="${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${DT}"
+          TAGS="${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm_${VLLM_VER}:${DT}"
 
           # Also tag with branch name for easy reference
           if [[ "${{ github.ref }}" == refs/heads/* ]]; then
             BRANCH="${GITHUB_REF#refs/heads/}"
-            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}"
           fi
 
           # Tag pushes also get the semver tag
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
-            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm_${TAG}:${DT}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm_${TAG}:${DT}"
           fi
 
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
@@ -122,16 +122,16 @@ jobs:
           VLLM_VER="${{ github.event.inputs.vllm_commit || 'v0.20.0' }}"
           DT=$(date +%Y%m%d%H%M%S)
 
-          TAGS="${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${DT}"
+          TAGS="${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${DT}"
 
           if [[ "${{ github.ref }}" == refs/heads/* ]]; then
             BRANCH="${GITHUB_REF#refs/heads/}"
-            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${BRANCH}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm-omni_${OMNI_VER}:${BRANCH}"
           fi
 
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
-            TAGS="${TAGS},${{ env.REGISTRY }}/rocm_gfx1151_vllm-omni_${TAG}:${DT}"
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm-omni_${TAG}:${DT}"
           fi
 
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
@@ -149,7 +149,7 @@ jobs:
           else
             BRANCH="main"
           fi
-          echo "image=${{ env.REGISTRY }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "image=${{ env.REGISTRY }}/${{ env.REPO }}/rocm_gfx1151_vllm_${VLLM_VER}:${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push vLLM-Omni image
         uses: docker/build-push-action@v6
@@ -180,10 +180,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### vLLM (text LLM + ASR)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ghcr.io/rocm_gfx1151_vllm_v0.20.0:20260502143025" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/\${{ github.repository }}/rocm_gfx1151_vllm_v0.20.0:20260502143025" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### vLLM-Omni (any-to-any multimodal)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ghcr.io/rocm_gfx1151_vllm-omni_v0.20.0rc1:20260502143025" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/\${{ github.repository }}/rocm_gfx1151_vllm-omni_v0.20.0rc1:20260502143025" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
