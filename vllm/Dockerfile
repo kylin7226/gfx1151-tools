@@ -139,8 +139,8 @@ ENV ROCM_HOME=/opt/rocm \
 
 RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
     echo "Building with bitcode: $HIP_DEVICE_LIB_PATH" && \
-    export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DHIP_PATH=/opt/rocm -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
-    uv pip install --no-build-isolation --no-deps -v . && \
+    export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
+    uv pip install --no-build-isolation --no-deps . && \
     rm -rf /root/.cache/uv /root/.cache/pip /tmp/*
 
 # 8b. vLLM runtime dependencies.
