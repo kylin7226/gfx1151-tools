@@ -1141,8 +1141,75 @@ except Exception:
 
         p_responses_proto.write_text(txt)
 
+    # Patch 16 (local, from hec-ovi/vllm-awq4-qwen): register the AWQ-INT4 MMQ
+    # HIP custom op into vLLM's mixed-precision kernel dispatcher so it's
+    # picked ahead of TritonW4A16 for the W4A16 g32 path on gfx1151.
+    # The .so is built from csrc/awq_mmq_gfx1151/ (host-mounted at /root/csrc/)
+    # and imports lazily at module-load time.
+    #
+    # Implementation: append a registration block to the dispatcher's
+    # __init__.py. On load the block adds the package dir to sys.path,
+    # imports our RocmMmqQ4LinearKernel, and inserts it at position 0 of
+    # _POSSIBLE_KERNELS[ROCM]. If the import fails (e.g. .so not built yet),
+    # the kernel list is left untouched and TritonW4A16 keeps its slot.
+    #
+    # apply_weights internally dispatches: M >= 32 (prefill) -> our HIP
+    # kernel, M < 32 (decode) -> TritonW4A16 fallback. Both paths use the
+    # same layer's weight tensors via the dual-storage process_weights step.
+    p_dispatch = Path('vllm/model_executor/kernels/linear/__init__.py')
+    if p_dispatch.exists():
+        txt = p_dispatch.read_text()
+        if "Patch 16" not in txt:
+            injection = (
+                "\n\n# --- Patch 16: AWQ-INT4 MMQ HIP custom op for gfx1151 (Strix Halo) ---\n"
+                "import sys as _sys\n"
+                "import os as _os\n"
+                "_AWQ_MMQ_DIR = '/root/csrc/awq_mmq_gfx1151'\n"
+                "if _os.path.exists(_AWQ_MMQ_DIR) and _AWQ_MMQ_DIR not in _sys.path:\n"
+                "    _sys.path.insert(0, _AWQ_MMQ_DIR)\n"
+                "try:\n"
+                "    from awq_mmq_gfx1151.vllm_kernel import RocmMmqQ4LinearKernel as _RocmMmqQ4\n"
+                "    if _RocmMmqQ4 not in _POSSIBLE_KERNELS.get(PlatformEnum.ROCM, []):\n"
+                "        _POSSIBLE_KERNELS[PlatformEnum.ROCM].insert(0, _RocmMmqQ4)\n"
+                "        logger.info('Patch 16: RocmMmqQ4LinearKernel registered at _POSSIBLE_KERNELS[ROCM][0]')\n"
+                "except Exception as _e:\n"
+                "    logger.warning('Patch 16: failed to register RocmMmqQ4LinearKernel: %s', _e)\n"
+                "# --- end Patch 16 ---\n"
+            )
+            txt += injection
+            p_dispatch.write_text(txt)
+            print(" -> Patched vllm/model_executor/kernels/linear/__init__.py (Patch 16: AWQ-INT4 MMQ HIP)")
+
+    # Patch 17 (local, from hec-ovi/vllm-awq4-qwen): drop vLLM's half/half2
+    # atomicAdd polyfills on ROCm.
+    #
+    # csrc/quantization/gptq/compat.cuh ships polyfills
+    #   __device__ void atomicAdd(half*  address, half  val)
+    #   __device__ void atomicAdd(half2* address, half2 val)
+    # gated on `#if defined(__CUDA_ARCH__) || defined(USE_ROCM)`. ROCm 7.13
+    # nightlies (post 7.13.0a20260426) added builtins
+    #   __device__ __half  atomicAdd(__half*  const, const __half)   @ amd_hip_fp16.h:869
+    #   __device__ __half2 atomicAdd(__half2* const, const __half2)  @ amd_hip_fp16.h:875
+    # With both the polyfill and the builtin visible, clang reports
+    # "call to 'atomicAdd' is ambiguous" in q_gemm.hip (10 sites).
+    #
+    # Fix: change the outermost guard to drop the entire ROCm path through
+    # this overload region. The polyfills are now CUDA-only; ROCm uses the
+    # HIP builtins exclusively. The named helpers atomicAdd_half /
+    # atomicAdd_half2 (defined above the guard) are untouched in case any
+    # other vLLM source calls them by name.
+    p_compat = Path('csrc/quantization/gptq/compat.cuh')
+    if p_compat.exists():
+        txt = p_compat.read_text()
+        old_guard = "#if defined(__CUDA_ARCH__) || defined(USE_ROCM)\n"
+        new_guard = "#if defined(__CUDA_ARCH__)\n"
+        if old_guard in txt:
+            txt = txt.replace(old_guard, new_guard, 1)
+            p_compat.write_text(txt)
+            print(" -> Patched csrc/quantization/gptq/compat.cuh (Patch 17: drop atomicAdd half/half2 polyfills on ROCm)")
+
     # ----------------------------------------------------------------
-    # Patch 16: Cache profile_run results to skip ~7 min memory
+    # Patch 18: Cache profile_run results to skip ~7 min memory
     # profiling on restart.
     #
     # vLLM runs synthetic forward passes every boot to size the KV cache.
@@ -1175,7 +1242,7 @@ except Exception:
         )
         read_replacement = (
             '        """\n'
-            '        # Strix Halo Patch 16: Try to use cached profile result\n'
+            '        # Strix Halo Patch 18: Try to use cached profile result\n'
             '        # to skip ~7 min memory profiling on restart.\n'
             '        if envs.VLLM_SKIP_MEMORY_PROFILING:\n'
             '            try:\n'
@@ -1197,7 +1264,7 @@ except Exception:
         )
         if "VLLM_SKIP_MEMORY_PROFILING" not in txt and read_anchor in txt:
             txt = txt.replace(read_anchor, read_replacement, 1)
-            print(" -> Patched vllm/v1/worker/gpu_worker.py (16a: cache read at top of determine_available_memory)")
+            print(" -> Patched vllm/v1/worker/gpu_worker.py (18a: cache read at top of determine_available_memory)")
 
         # 16b: Insert cache write after computing available_kv_cache_memory_bytes.
         write_anchor = (
@@ -1214,7 +1281,7 @@ except Exception:
             '            - profile_result.non_kv_cache_memory\n'
             '            - cudagraph_memory_estimate_applied\n'
             '        )\n\n'
-            '        # Strix Halo Patch 16: Cache the result for future restarts.\n'
+            '        # Strix Halo Patch 18: Cache the result for future restarts.\n'
             '        if envs.VLLM_SKIP_MEMORY_PROFILING:\n'
             '            try:\n'
             '                import vllm_profile_cache as _vpc\n'
@@ -1230,14 +1297,14 @@ except Exception:
             '                logger.debug("Profile cache write failed (non-fatal)")\n\n'
             '        unrequested_memory = self.init_snapshot.free_memory - self.requested_memory\n'
         )
-        if "Strix Halo Patch 16" not in txt and write_anchor in txt:
+        if "Strix Halo Patch 18" not in txt and write_anchor in txt:
             txt = txt.replace(write_anchor, write_replacement, 1)
-            print(" -> Patched vllm/v1/worker/gpu_worker.py (16b: cache write after profiling)")
+            print(" -> Patched vllm/v1/worker/gpu_worker.py (18b: cache write after profiling)")
 
         p_gpu_worker.write_text(txt)
 
     # ----------------------------------------------------------------
-    # Patch 17: PR #40334 cherry-pick — dtype cast in
+    # Patch 19: PR #40334 cherry-pick — dtype cast in
     # combine_hidden_states for mixed-precision targets.
     #
     # AWQ-quantized models with unquantized attention layers can output
@@ -1277,10 +1344,10 @@ except Exception:
         if "hidden_states.dtype != self.model.fc.params_dtype" not in txt and old_block in txt:
             txt = txt.replace(old_block, new_block, 1)
             p_qwen3_dflash.write_text(txt)
-            print(" -> Patched vllm/model_executor/models/qwen3_dflash.py (17: PR #40334 dtype cast in combine_hidden_states)")
+            print(" -> Patched vllm/model_executor/models/qwen3_dflash.py (19: PR #40334 dtype cast in combine_hidden_states)")
 
     # ----------------------------------------------------------------
-    # Patch 18: Fix non-streaming /v1/responses with enable_thinking=false.
+    # Patch 20: Fix non-streaming /v1/responses with enable_thinking=false.
     #
     # Patch 15 (above) wired chat_template_kwargs through the request
     # model. But _make_response_output_items() (the non-streaming code
@@ -1320,7 +1387,7 @@ except Exception:
         )
         if "self._effective_chat_template_kwargs(request)" not in txt and parser_call_old in txt:
             txt = txt.replace(parser_call_old, parser_call_new, 1)
-            print(" -> Patched vllm/entrypoints/openai/responses/serving.py (18a: pass chat_template_kwargs to parser)")
+            print(" -> Patched vllm/entrypoints/openai/responses/serving.py (20a: pass chat_template_kwargs to parser)")
 
         # 18b: Safety net — skip parser when reasoning already ended in prompt.
         # Insert right before "if self.parser:" block.
@@ -1329,7 +1396,7 @@ except Exception:
             '        if self.parser:\n'
         )
         safety_replacement = (
-            '        # Strix Halo Patch 18b: If reasoning already ended in the\n'
+            '        # Strix Halo Patch 20b: If reasoning already ended in the\n'
             '        # prompt (enable_thinking=false pre-fills <think>\\n\\n</think>),\n'
             '        # skip the parser and treat the full output as content.\n'
             '        # This mirrors the streaming path behavior.\n'
@@ -1369,9 +1436,9 @@ except Exception:
             '        # Use parser to extract and create response output items\n'
             '        if self.parser:\n'
         )
-        if "Strix Halo Patch 18b" not in txt and safety_anchor in txt:
+        if "Strix Halo Patch 20b" not in txt and safety_anchor in txt:
             txt = txt.replace(safety_anchor, safety_replacement, 1)
-            print(" -> Patched vllm/entrypoints/openai/responses/serving.py (18b: is_reasoning_end safety net)")
+            print(" -> Patched vllm/entrypoints/openai/responses/serving.py (20b: is_reasoning_end safety net)")
 
         p_responses_serving.write_text(txt)
 
