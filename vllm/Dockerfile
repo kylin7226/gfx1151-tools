@@ -63,6 +63,11 @@ ENV PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
 RUN uv venv /opt/venv --python 3.12 && \
     uv pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
+# uv hardening — prevent download timeouts and hardlink failures in containers.
+ENV UV_HTTP_TIMEOUT=500 \
+    UV_INDEX_STRATEGY="unsafe-best-match" \
+    UV_LINK_MODE=copy
+
 # 4. PyTorch + triton from the AMD v2-staging gfx1151 nightly index.
 # This index serves complete matched daily sets; today resolves to:
 #   torch        2.10.0+rocm7.13.0a20260426
@@ -175,7 +180,10 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:/opt/rocm/llvm/lib \
     HSA_OVERRIDE_GFX_VERSION=11.5.1 \
     HSA_NO_SCRATCH_RECLAIM=1 \
     MIOPEN_FIND_MODE=FAST \
+    MIOPEN_DEBUG_CONV_DIRECT=0 \
+    MIOPEN_DEBUG_CONV_GEMM=0 \
     FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+    SAFETENSORS_FAST_GPU=1 \
     VLLM_ROCM_USE_AITER=0 \
     VLLM_USE_TRITON_AWQ=1 \
     VLLM_DISABLE_COMPILE_CACHE=1
