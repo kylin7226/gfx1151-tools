@@ -148,7 +148,7 @@ vllm-omni/
 |---|------|------|
 | 推理引擎 | vLLM-Omni | v0.20.0rc1 |
 | 基础 vLLM | vLLM | v0.20.1 |
-| ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
+| ROCm SDK | TheRock 7.13 nightly tarball | /opt/rocm |
 | PyTorch | torch + triton | 2.10 + 3.6 |
 | 注意力 | Triton SDPA (JIT 运行时编译) | — |
 | 音频编解码 | onnxruntime-rocm | — |
