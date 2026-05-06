@@ -1,17 +1,12 @@
 # Secrets
 .env
-../vllm/.env
 
 # Cache directories
-../vllm/.triton-cache/
-../vllm/.vllm-cache/
+.triton-cache/
+.vllm-cache/
 
 # Git
 .git/
-
-# Docs
-../vllm/docs/
-../vllm-omni/docs/
 
 # IDE
 .vscode/
