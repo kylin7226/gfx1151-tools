@@ -1,21 +1,26 @@
 services:
   vllm:
-    image: rocm_gfx1151_vllm:v0.20.0
+    image: rocm_gfx1151_vllm:v0.20.1
     build:
       context: ./vllm
       args:
-        VLLM_COMMIT: ${VLLM_COMMIT:-v0.20.0}
+        VLLM_COMMIT: ${VLLM_COMMIT:-v0.20.1}
     container_name: rocm_gfx1151_vllm
     # Manual control only. NEVER auto-restart on host reboot  -  this rig
     # is the user's daily-driver PC; if it crashes during a kernel test
     # we want it to stay down so the user can inspect logs from a phone.
     restart: "no"
-    privileged: true
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
     ports:
-      # Bind to all host interfaces so containers in other docker networks
       # can reach vLLM via host.docker.internal / the docker bridge gateway.
       # Loopback-only ("127.0.0.1:8000:8000") blocks cross-container traffic
       # because the kernel won't deliver bridge-arriving packets to a
@@ -77,20 +82,14 @@ services:
       # ConchLinearKernel. Passing the flag explicitly risks falling
       # back to the legacy ops.awq_gemm slow path.
       #
-      # Attention backends (load-bearing on gfx1151):
-      #   LM:  ROCM_ATTN selected for DFlash speculative decoding. Our
-      #        Patch 13 cherry-picks vLLM PR #40176 which adds
-      #        supports_non_causal()=True + causal:bool field to this
-      #        backend (NOT in v0.20.0 tag, only on main as of 04-22).
-      #        Historical note: TRITON_ATTN beat ROCM_ATTN by 2x at long
-      #        context BEFORE PR #40176, but TRITON_ATTN doesn't expose
-      #        non-causal so it cannot host DFlash. Re-bench after
-      #        spec-decode is stable to validate the tradeoff.
-      #   ViT: TRITON_ATTN required  -  auto-pick falls to TORCH_SDPA
-      #        which silently produces NaN/Inf and collapses output to
-      #        endless "!" stream on image input (kyuz0 PR #47).
+      # Attention backends (per ROCm/vllm gfx11 branch recommendation):
+      #   LM:  TRITON_ATTN is faster than ROCM_ATTN on RDNA (gfx11/gfx12)
+      #        because ROCM_ATTN's custom paged attention kernel falls back
+      #        to Triton internally with extra overhead (ROCm/vllm gfx11).
+      #   ViT: TRITON_ATTN required — auto-pick falls to TORCH_SDPA
+      #        which silently produces NaN/Inf on image input.
       - --attention-backend
-      - ROCM_ATTN
+      - TRITON_ATTN
       - --mm-encoder-attn-backend
       - TRITON_ATTN
       # Qwen3.x emits <think>...</think> tokens in native thinking mode.
@@ -123,16 +122,6 @@ services:
       # frees ~37 GiB of UMA vs BF16, full 256K is comfortable.
       - --max-model-len
       - "${VLLM_MAX_MODEL_LEN:-262144}"
-      # DFlash speculative decoding (PR #36847 NVIDIA base + PR #40176 ROCm
-      # non-causal attn + PR #40898 SWA support; the latter two are local
-      # cherry-picks via patch_strix.py Patches 13 and 14).
-      # Drafter: z-lab/Qwen3.6-27B-DFlash (~2B BF16, gated on HF), block_size=16.
-      # Start at N=1 for boot correctness; scale to 4 then 8 once verified.
-      # The drafter has interleaved SWA layers (4 sliding + 1 full), which is
-      # why PR #40898 is required (target_layer_ids +1 fix + per-layer SWA
-      # attn metadata). Acceptance length without #40898 is ~25% lower.
-      - --speculative-config
-      - '{"method":"dflash","model":"z-lab/Qwen3.6-27B-DFlash","num_speculative_tokens":${VLLM_DFLASH_N:-8}}'
 
   # Qwen3-ASR — speech-to-text service (separate container; vLLM cannot
   # serve a text LLM and an ASR model in one instance). Three modes on
@@ -140,19 +129,22 @@ services:
   # streaming (same URL + stream=true), and WebSocket realtime
   # (ws://host/v1/realtime, PCM16 chunks → live transcription).
   vllm-asr:
-    image: rocm_gfx1151_vllm:v0.20.0
+    image: rocm_gfx1151_vllm:v0.20.1
     build:
       context: ./vllm
       args:
-        VLLM_COMMIT: ${VLLM_COMMIT:-v0.20.0}
+        VLLM_COMMIT: ${VLLM_COMMIT:-v0.20.1}
     container_name: vllm-asr
     restart: "no"
+    stop_grace_period: 30s
     privileged: true
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
     devices:
-      - /dev/kfd:/dev/kfd
-      - /dev/dri:/dev/dri
-    ports:
-      - "${VLLM_ASR_HOST_PORT:-8001}:8000"
     volumes:
       - ${VLLM_HOST_MODELS_DIR}:/models:ro
       - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}:/root/.cache/vllm
@@ -207,7 +199,14 @@ services:
         VLLM_OMNI_COMMIT: ${VLLM_OMNI_COMMIT:-v0.20.0rc1}
     container_name: vllm-omni
     restart: "no"
+    stop_grace_period: 30s
     privileged: true
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
@@ -235,12 +234,8 @@ services:
       MIOPEN_FIND_MODE: FAST
       # Triton AMD FlashAttention (the only viable FA path on RDNA 3.5).
       FLASH_ATTENTION_TRITON_AMD_ENABLE: "TRUE"
-      # AOTriton pre-compiled kernels for reduced JIT overhead.
-      AOTRITON_PATH: /opt/rocm/aotriton
       # vllm-omni ROCm platform detection.
       VLLM_OMNI_TARGET_DEVICE: rocm
-      # ROCm AOTriton experimental features.
-      TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
       # NEVER set VLLM_LOGGING_LEVEL=DEBUG (see vllm service comments).
     command:
       - vllm-omni

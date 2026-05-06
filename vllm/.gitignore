@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Test outputs
+test/bench_results.json
+test/bench_full_results.json
+test/bench_full_threejs.html
+test/bench_longctx_result.json
+
+# Cache directories
+.triton-cache/
+.vllm-cache/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc

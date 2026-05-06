@@ -36,7 +36,7 @@ HF_HUB_ENABLE_HF_TRANSFER=1 hf download Qwen/Qwen3-Omni-MoE-27B --cache-dir "$VL
 ```bash
 # 1. 在项目根目录中：
 
-# 2. 构建 vllm-omni 镜像（依赖 rocm_gfx1151_vllm:v0.20.0）
+# 2. 构建 vllm-omni 镜像（依赖 rocm_gfx1151_vllm:v0.20.1）
 podman-compose build vllm-omni
 
 # 3. 启动服务
@@ -83,7 +83,7 @@ curl http://127.0.0.1:8002/v1/models
 构建依赖链：
 
 ```
-rocm_gfx1151_vllm:v0.20.0 (vLLM v0.20.0 + PyTorch + AOTriton)
+rocm_gfx1151_vllm:v0.20.1 (vLLM v0.20.1 + PyTorch + pip ROCm SDK)
     └── rocm_gfx1151_vllm-omni:v0.20.0rc1 (+ vllm-omni v0.20.0rc1 + gfx1151 patches)
 ```
 
@@ -95,8 +95,7 @@ vllm-omni 上游面向 CDNA 数据中心 GPU（MI300/MI325，gfx94x/gfx95x）。
 |------|------|------|
 | Patch 1 | `vllm_omni/platforms/rocm/platform.py` | `get_diffusion_attn_backend_cls()` 中添加 gfx11xx 分支，返回 `TRITON_ATTN`（上游只允许 90 < capability < 100 的 aiter） |
 | Patch 1b | `vllm_omni/platforms/rocm/platform.py` | 添加 `_is_gfx11xx()` 辅助函数，检测 110 <= capability < 120 |
-| Patch 2 | `vllm_omni/platforms/rocm/__init__.py` | 注入 `AOTRITON_PATH` 默认值，确保 AOTriton 预编译核可用 |
-| Patch 3 | 安装时检查 | 确认 onnxruntime-rocm 已正确安装（无 vanilla onnxruntime 冲突） |
+| Patch 2 | 安装时检查 | 确认 onnxruntime-rocm 已正确安装（无 vanilla onnxruntime 冲突） |
 
 补丁在 Docker 构建过程中通过 `scripts/patch_omni.py` 自动应用。
 
@@ -125,12 +124,11 @@ AITER 使用了 CDNA 专属指令（DPP 数据并行原语、`v_pk_mul_f32`/`v_c
 
 | 维度 | vLLM 子项目 | vLLM-Omni 子项目 |
 |------|-------------|-------------------|
-| 基础 | vLLM v0.20.0 | vllm-omni v0.20.0rc1 (基于 vLLM v0.20.0) |
+| 基础 | vLLM v0.20.1 | vllm-omni v0.20.0rc1 (基于 vLLM v0.20.0) |
 | 端口 | 8000 (LLM) + 8001 (ASR) | 8002 |
 | 模型 | Qwen3.6-27B-AWQ4 | Qwen3-Omni-MoE-27B |
 | 模态 | 文本 + 视觉（输入） | 文本/图像/视频/音频（输入/输出） |
-| 推测解码 | DFlash N=8 | 不支持 |
-| 构建依赖 | 独立 | 依赖 rocm_gfx1151_vllm:v0.20.0 |
+| 构建依赖 | 独立 | 依赖 rocm_gfx1151_vllm:v0.20.1 |
 
 两个子项目共享同一个 builder 镜像，omni 在其之上叠加安装，互不干扰。
 
@@ -149,17 +147,17 @@ vllm-omni/
 | 层 | 组件 | 版本 |
 |---|------|------|
 | 推理引擎 | vLLM-Omni | v0.20.0rc1 |
-| 基础 vLLM | vLLM | v0.20.0 |
-| ROCm SDK | TheRock ROCm 7.13 nightly | gfx1151 |
+| 基础 vLLM | vLLM | v0.20.1 |
+| ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
 | PyTorch | torch + triton | 2.10 + 3.6 |
-| 注意力 | AOTriton (预编译 gfx1151 核) + Triton SDPA | — |
+| 注意力 | Triton SDPA (JIT 运行时编译) | — |
 | 音频编解码 | onnxruntime-rocm | — |
 
 ## 已知限制
 
+- **AOTriton**：Ubuntu 26.04 自带 CMake 4.2 与 AOTriton 构建系统不兼容，改用 Triton JIT 运行时编译
 - **AITER**：CDNA 专属指令在 RDNA 上不存在，完全禁用
 - **HIP Graph**：gfx1151 上存在冻结类问题，使用 `--enforce-eager`
-- **DFlash 推测解码**：vllm-omni 的 stage pipeline 架构与 DFlash speculative decoding 语义不同，暂不支持
 - **Flash-Attention（Dao-AILab）**：gfx1151 上编译失败，使用 Triton SDPA
 - **性能**：Omni MoE 模型在核显上的性能尚未进行系统级基准测试，预期低于 AWQ4 文本 LLM
 

@@ -154,8 +154,8 @@ class RocmMmqQ4LinearKernel(MPLinearKernel):
         layer._awq_mmq_triton_w_zp = w_zp.t().contiguous() if w_zp is not None else None
 
     # Below this M threshold, route to TritonW4A16 fallback (decode-shape).
-    # Tuned to match the ~17 t/s decode floor: DFlash with N=8 spec tokens
-    # gives M=8 typical, plus warmup/probe at M=1.
+    # At decode M=1 (single sequence), the HIP kernel overhead outweighs
+    # its benefit; TritonW4A16 is faster for small-batch decode.
     SMALL_M_THRESHOLD = 32
 
     def apply_weights(

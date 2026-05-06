@@ -16,6 +16,7 @@ Writes results to test/bench_results.json and prints a Markdown table to stdout.
 import argparse
 import base64
 import json
+import os
 import time
 import urllib.request
 import urllib.error
@@ -23,7 +24,19 @@ from pathlib import Path
 
 HOST = "http://127.0.0.1:8000"
 MODEL = "Qwen3.6-27B-AWQ4"
-IMAGE_PATH = "/home/hec/Pictures/profile_small.jpg"
+# Vision test image — set via env var or CLI flag. Falls back to common paths.
+def _find_image() -> str | None:
+    candidate = os.environ.get("TEST_IMAGE_PATH")
+    if candidate:
+        return candidate
+    for p in [Path.home() / "Pictures" / "profile_small.jpg",
+              Path.home() / "Pictures" / "test.png",
+              Path(__file__).parent / "test_image.png"]:
+        if p.exists():
+            return str(p)
+    return None
+
+IMAGE_PATH = _find_image()
 
 
 def post(path, body, timeout=1800):

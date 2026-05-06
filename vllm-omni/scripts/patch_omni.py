@@ -93,30 +93,7 @@ def patch_omni():
                     print(f" -> Patched {p_rocm_platform} (1b: _is_gfx11xx helper added)")
 
     # ----------------------------------------------------------------
-    # Patch 2: Ensure AOTRITON_PATH is respected in vllm-omni
-    #
-    # vllm-omni's ROCm platform may not inherit the AOTRITON_PATH env
-    # var from the base image. Ensure it's available at import time.
-    # ----------------------------------------------------------------
-    p_platform_init = _find_site_file(
-        "vllm_omni/platforms/rocm/__init__.py"
-    )
-    if p_platform_init and p_platform_init.exists():
-        txt = p_platform_init.read_text()
-        if "AOTRITON_PATH" not in txt:
-            aotriton_inject = (
-                '# Ensure AOTRITON_PATH is available for PyTorch AOTriton discovery\n'
-                'import os as _omni_aotriton_os\n'
-                'if not _omni_aotriton_os.environ.get("AOTRITON_PATH"):\n'
-                '    _omni_aotriton_os.environ["AOTRITON_PATH"] = "/opt/rocm/aotriton"\n'
-                'del _omni_aotriton_os\n\n'
-            )
-            txt = aotriton_inject + txt
-            p_platform_init.write_text(txt)
-            print(f" -> Patched {p_platform_init} (2: AOTRITON_PATH default)")
-
-    # ----------------------------------------------------------------
-    # Patch 3: Ensure onnxruntime conflict is resolved
+    # Patch 2: Ensure onnxruntime conflict is resolved
     #
     # vllm-omni setup.py should have auto-uninstalled vanilla onnxruntime
     # and installed onnxruntime-rocm. Verify no stale imports remain.

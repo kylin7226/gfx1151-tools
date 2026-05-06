@@ -1,6 +1,6 @@
 # 项目使用指南
 
-Qwen 3.6-27B AWQ-INT4 + DFlash 推测解码 + Qwen3-ASR 语音识别，运行于 AMD Strix Halo (gfx1151)。
+Qwen 3.6-27B AWQ-INT4 + Qwen3-ASR 语音识别，运行于 AMD Strix Halo (gfx1151)。
 
 ## 快速导航
 
@@ -36,14 +36,24 @@ cat /sys/class/drm/card1/device/mem_info_gtt_total
 # 期望值：~124554670080（≈ 116 GiB）
 ```
 
-### 1.4 安装 Docker
+### 1.4 安装 Podman
 
 ```bash
 # Ubuntu/Debian
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
+sudo apt-get install -y podman
+# 或使用官方安装脚本：
+curl -fsSL https://get.podman.io/ | sh
+sudo usermod -aG podman $USER
 # 重新登录后生效
+
+# 可选：安装 podman-compose（或使用 docker-compose 兼容层）
+pip install podman-compose
 ```
+
+> **注意**：本文档中的 `docker compose` 命令在 Podman 环境下可通过以下方式兼容：
+> - 安装 `podman-docker` 包（提供 `docker` → `podman` 兼容层）：`sudo apt install podman-docker`
+> - 或设置别名：`alias docker=podman`
+> - 或直接使用 `podman-compose` 替代 `docker compose`
 
 ## 二、克隆项目
 
@@ -76,7 +86,6 @@ nano .env
 | `VLLM_MAX_NUM_SEQS` | `1` | 最大并发流数 |
 | `VLLM_MAX_MODEL_LEN` | `262144` | 最大上下文长度（256K） |
 | `VLLM_GPU_MEMORY_UTIL` | `0.9` | 显存利用率 |
-| `VLLM_DFLASH_N` | `8` | DFlash 推测 token 数 |
 | `VLLM_ASR_MODEL_ID` | `Qwen/Qwen3-ASR-8B` | ASR 模型 |
 | `VLLM_ASR_HOST_PORT` | `8001` | ASR 服务端口 |
 | `VLLM_ASR_GPU_MEMORY_UTIL` | `0.9` | ASR 显存利用率 |
@@ -91,15 +100,7 @@ export $(grep -E '^(HF_TOKEN|VLLM_HOST_MODELS_DIR)=' .env | xargs)
 HF_HUB_ENABLE_HF_TRANSFER=1 hf download cyankiwi/Qwen3.6-27B-AWQ-INT4 --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
 ```
 
-### 4.2 DFlash 推测器（推荐，需接受条款）
-
-DFlash 推测器是 gated model，需要先访问 https://huggingface.co/z-lab/Qwen3.6-27B-DFlash 接受条款。
-
-```bash
-HF_HUB_ENABLE_HF_TRANSFER=1 hf download z-lab/Qwen3.6-27B-DFlash --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
-```
-
-### 4.3 ASR 模型（可选）
+### 4.2 ASR 模型（可选）
 
 ASR 模型也是 gated model，需要先访问 https://huggingface.co/Qwen/Qwen3-ASR-8B 接受条款。
 
@@ -107,7 +108,7 @@ ASR 模型也是 gated model，需要先访问 https://huggingface.co/Qwen/Qwen3
 HF_HUB_ENABLE_HF_TRANSFER=1 hf download Qwen/Qwen3-ASR-8B --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
 ```
 
-> 三个模型可以并行下载。磁盘占用：LLM ~14 GB + 推测器 ~3.3 GB + ASR ~16 GB = ~33.3 GB。
+> 两个模型可以并行下载。磁盘占用：LLM ~14 GB + ASR ~16 GB = ~30 GB。
 
 ## 五、构建镜像
 
@@ -181,7 +182,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ./glados.py "explain mitosis"
 ```
 
-REPL 中会实时流式显示 thinking 内容和回答，并在结束后显示统计信息（token 数、耗时、吞吐量、DFlash 接受率）。
+REPL 中会实时流式显示 thinking 内容和回答，并在结束后显示统计信息（token 数、耗时、吞吐量）。
 
 ### 7.3 语音识别
 
@@ -240,22 +241,22 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 ## 十、补丁说明
 
-项目对 vLLM v0.20.0 应用了 20 个补丁：
+项目对 vLLM v0.20.1 应用了 18 个补丁：
 
 | 补丁 | 来源 | 内容 |
 |---|---|---|
 | 1-12 | kyuz0 (amd-strix-halo-vllm-toolboxes) | gfx1151 硬件使能（amdsmi 禁用、架构检测、CDNA-only 特性保护、JIT 路径修复、APU VRAM 余量等） |
-| 13 | PR #40176 | ROCM_ATTN non-causal 注意力，DFlash 需要 |
-| 14 | PR #40898 | DFlash 推测器 SWA 支持 + `target_layer_ids` +1 修正 |
-| 15 | 本地 | 将 `chat_template_kwargs` 传入 `/v1/responses` 流式路径 |
+| 13 | 本地 | 将 `chat_template_kwargs` 传入 `/v1/responses` 流式路径 |
+| 14 | hec-ovi/vllm-awq4-qwen | AWQ-INT4 MMQ HIP 自定义核注册 |
+| 15 | hec-ovi/vllm-awq4-qwen | 移除 atomicAdd half/half2 polyfills（ROCm 7.13 兼容性） |
 | 16 | 本地 | 缓存 profile_run 结果，跳过 ~7 分钟内存分析 |
-| 17 | PR #40334 | `combine_hidden_states` 中的 dtype 转换修复 |
-| 18 | 本地 | 修复非流式 `/v1/responses` + `enable_thinking=false` |
+| 17 | 本地 + PR #40334 | `combine_hidden_states` dtype 修复 + 非流式 `/v1/responses` enable_thinking 修复 |
+| 18 | ROCm/vllm gfx11 | Strix Halo softmax segments 调优（16→32） |
 
 ## 十一、运行基准测试
 
 ```bash
-# SSE 追踪 T1-T5 推理/工具调用验证（Patch 15 验证）
+# SSE 追踪 T1-T5 推理/工具调用验证（Patch 13+17 验证）
 python3 test/verify_responses_streaming.py
 
 # 5 端点扫描 + 工具 + 图像 + Three.js 代码生成
@@ -286,14 +287,8 @@ python3 test/bench.py
 ### 模型加载失败 "Access denied"
 
 1. 确认 `.env` 中的 `HF_TOKEN` 有效
-2. 确认已接受 Gated model 条款（DFlash 和 ASR 都需要）
+2. 确认已接受 Gated model 条款（ASR 和 Omni 模型都需要）
 3. 重新运行下载命令
-
-### DFlash 输出质量异常
-
-1. 先试 `num_speculative_tokens=1` 确认基线
-2. 逐步增加到 N=4, N=8
-3. 如果仍有问题，暂时关闭推测解码
 
 ### 工具调用在流式模式下不完整
 
@@ -353,7 +348,7 @@ docker logs rocm_gfx1151_vllm 2>&1 | grep -E "Application startup|Available KV|C
 - 推送 `v*` tag：标签为 `:<版本号>` + `<日期时间>`
 - 也可通过 `workflow_dispatch` 手动触发，可自定义 `VLLM_COMMIT`
 
-镜像地址：`ghcr.io/rocm_gfx1151_vllm_v0.20.0:<YYYYMMDDhhmmss>`
+镜像地址：`ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm_v0.20.1:<YYYYMMDDhhmmss>`
 
 ## 十七、相关文档
 

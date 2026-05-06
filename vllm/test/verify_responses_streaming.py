@@ -48,29 +48,19 @@ exceed traditional GPU VRAM budgets - a 27B parameter model in 4-bit AWQ
 quantization (~16 GB weights + ~24 GB KV cache at 128K context) fits easily
 within the platform's memory budget.
 
-Software stack on Linux: TheRock ROCm 7.13 nightly tarballs include gfx1151
+Software stack on Linux: ROCm 7.13 nightly pip wheels include gfx1151
 support that is not yet present in the official ROCm 6.x releases. The vLLM
 0.20.0 source tree requires custom patches (collected in patch_strix.py) to
-enable proper attention backend selection (ROCM_ATTN), Triton autotuning
-configurations specific to gfx1151, and DFlash speculative decoding paths.
+enable proper attention backend selection (TRITON_ATTN), Triton autotuning
+configurations specific to gfx1151, and AWQ-INT4 kernel registration.
 
 Performance characteristics observed: prefill bandwidth peaks at 400 tokens/sec
 on short contexts and degrades to 33-38 tokens/sec on multi-thousand-token
-prompts. Decode throughput is approximately 14-18 tokens/sec single-stream and
-13.5 tokens/sec/stream under three concurrent streams. Cold boot of the vLLM
-container averages 9 minutes due to model load (95s), profile run / autotuning
-(6-7 min), and final server startup (5s); only ~30s is reclaimed by the Triton
-JIT cache on rewarm. The MIOpen perf cache is not host-mounted, so its state
-does not persist across container recreations.
-
-For the Qwen3.6-27B-AWQ-INT4 model specifically, DFlash speculative decoding
-with the z-lab/Qwen3.6-27B-DFlash drafter at 8 speculative tokens provides a
-modest decode-rate uplift on accepted continuations, particularly for the kind
-of repetitive structured output common in tool-calling agent workloads. The
-acceptance rate varies considerably by prompt class: long literal-passage
-recall sits near the upper bound, free-form prose generation sits in the
-middle, and complex reasoning chains sit lower as the drafter struggles to
-predict deliberative token paths.
+prompts. Decode throughput is approximately 5-6 tokens/sec single-stream. Cold
+boot of the vLLM container averages 9 minutes due to model load (95s), profile
+run / autotuning (6-7 min), and final server startup (5s); subsequent restarts
+drop to ~95s via the profile cache. The MIOpen perf cache is not host-mounted,
+so its state does not persist across container recreations.
 
 KV cache memory accounting at 128K context with max_num_seqs=3: the available
 pool is 23.61 GiB after model load, which divides into roughly 7.87 GiB per

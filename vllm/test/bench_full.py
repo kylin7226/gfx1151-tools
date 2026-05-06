@@ -1,4 +1,4 @@
-"""Comprehensive DFlash bench  -  exercises all 5 endpoints + tool calling on
+"""Comprehensive bench — exercises all 5 endpoints + tool calling on
 /v1/responses + a real Three.js codegen task. Generic, not user-specific.
 
 Captures wall-clock t/s per run, computes mean / median / p95 per test, saves
@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import statistics
 import time
 import urllib.request
@@ -20,12 +21,28 @@ from pathlib import Path
 
 HOST = "http://127.0.0.1:8000"
 MODEL = "Qwen3.6-27B-AWQ4"
-BACKEND_LABEL = "ROCM_ATTN + DFlash"  # filled in below from /v1/models meta
+BACKEND_LABEL = "TRITON_ATTN"  # filled in below from /v1/models meta
 TIMEOUT = 1800
 
-IMG_DIR = Path("/home/hec/Pictures")
-IMAGE_A = IMG_DIR / "frost_1.png"
-IMAGE_B = IMG_DIR / "splash.png"
+# Vision test images — set via env vars or fall back to common paths.
+def _find_image(name: str) -> Path | None:
+    candidate = os.environ.get(name)
+    if candidate:
+        return Path(candidate)
+    for p in [Path.home() / "Pictures" / Path(candidate_name)
+              for candidate_name in ("frost_1.png", "splash.png")]:
+        pass  # handled below
+    return None
+
+def _default_img_dir() -> Path | None:
+    for d in [Path.home() / "Pictures", Path(__file__).parent]:
+        if d.is_dir():
+            return d
+    return None
+
+_IMG_DIR = _default_img_dir()
+IMAGE_A = Path(os.environ.get("TEST_IMAGE_FROST", str((_IMG_DIR / "frost_1.png") if _IMG_DIR else "")))
+IMAGE_B = Path(os.environ.get("TEST_IMAGE_SPLASH", str((_IMG_DIR / "splash.png") if _IMG_DIR else "")))
 
 OUT_JSON = Path(__file__).parent / "bench_full_results.json"
 OUT_THREEJS = Path(__file__).parent / "bench_full_threejs.html"

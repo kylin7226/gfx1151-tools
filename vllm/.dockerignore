@@ -1,0 +1,31 @@
+# Secrets
+.env
+
+# Cache directories
+.triton-cache/
+.vllm-cache/
+hub/
+
+# Test outputs
+test/bench_results.json
+test/bench_full_results.json
+test/bench_full_threejs.html
+test/bench_longctx_result.json
+
+# Docs (not needed in build context)
+docs/
+
+# Git
+.git/
+.gitignore
+
+# CI
+.github/
+
+# IDE
+.vscode/
+*.swp
+*~
+
+# Logs
+logs/

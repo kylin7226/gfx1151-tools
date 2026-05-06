@@ -2,14 +2,14 @@
 #
 # Installs vllm-omni v0.20.0rc1 (rebased on upstream vLLM v0.20.0) and
 # applies gfx1151-specific patches to the vllm_omni package so that
-# attention backends, AOTriton, and ROCm platform detection work correctly
-# on AMD Strix Halo (RDNA 3.5 / gfx1151).
+# attention backends and ROCm platform detection work correctly on AMD
+# Strix Halo (RDNA 3.5 / gfx1151).
 #
 # Build order:
 #   1. podman-compose build vllm       (builds the base builder image)
 #   2. podman-compose build vllm-omni  (layers vllm-omni on top)
 
-ARG BASE_IMAGE=rocm_gfx1151_vllm:v0.20.0
+ARG BASE_IMAGE=rocm_gfx1151_vllm:v0.20.1
 FROM ${BASE_IMAGE}
 
 # 1. vllm-omni runtime deps (not in base builder image).
@@ -39,8 +39,7 @@ RUN python /opt/vllm-omni/patch_omni.py
 WORKDIR /opt
 
 # 3. Runtime env overrides — inherited from the base builder image
-# (AOTRITON_PATH, FLASH_ATTENTION_TRITON_AMD_ENABLE, etc.) plus
-# vllm-omni-specific additions.
+# (FLASH_ATTENTION_TRITON_AMD_ENABLE, etc.) plus vllm-omni-specific additions.
 ENV VLLM_OMNI_TARGET_DEVICE=rocm
 
 CMD ["/bin/bash"]

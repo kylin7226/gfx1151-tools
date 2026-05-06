@@ -1,6 +1,6 @@
 # vLLM 文本大模型推理
 
-在 AMD Strix Halo（gfx1151 / RDNA 3.5）上运行 Qwen 3.6-27B AWQ-INT4 量化模型，支持 DFlash 推测解码、视觉输入、工具调用和 Qwen3-ASR 语音识别。
+在 AMD Strix Halo（gfx1151 / RDNA 3.5）上运行 Qwen 3.6-27B AWQ-INT4 量化模型，支持视觉输入、工具调用和 Qwen3-ASR 语音识别。
 
 ## 快速开始
 
@@ -14,7 +14,6 @@
 ```bash
 export $(grep -E '^(HF_TOKEN|VLLM_HOST_MODELS_DIR)=' .env | xargs)
 HF_HUB_ENABLE_HF_TRANSFER=1 hf download cyankiwi/Qwen3.6-27B-AWQ-INT4 --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
-HF_HUB_ENABLE_HF_TRANSFER=1 hf download z-lab/Qwen3.6-27B-DFlash       --cache-dir "$VLLM_HOST_MODELS_DIR/hub"  # DFlash gated
 ```
 
 ### 构建与启动
@@ -47,12 +46,8 @@ curl http://127.0.0.1:8000/v1/models
 
 | 场景 | 吞吐量 | 说明 |
 |------|--------|------|
-| 单流解码（DFlash N=8） | **24.8 t/s** | Qwen 3.6-27B AWQ4，256K 上下文 |
-| 无推测基线 | 5.6 t/s | 同上配置 |
-| 3 流并发 | **27-41 t/s** 聚合 | 每流 ~13.5 t/s |
+| 单流解码（基线） | ~5.6 t/s | Qwen 3.6-27B AWQ4，256K 上下文 |
 | 预填充 | **33-38 t/s** 均值 | 包含 prompt-with-tools 场景 |
-
-> +340% 提升来自 DFlash 推测解码（5.6 → 24.8 t/s）
 
 ## 模型
 
@@ -61,7 +56,6 @@ curl http://127.0.0.1:8000/v1/models
 | 目标模型 | `cyankiwi/Qwen3.6-27B-AWQ-INT4` |
 | 量化方案 | AWQ-INT4, W4A16, group_size 32, compressed-tensors |
 | 磁盘占用 | ~14 GiB |
-| DFlash 推测器 | `z-lab/Qwen3.6-27B-DFlash` (~2B BF16, Gated) |
 
 ## API 端点
 
@@ -95,7 +89,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ```
 vllm/
 ├── README.md              ← 本文件
-├── Dockerfile             ← vLLM + PyTorch + AOTriton 构建
+├── Dockerfile             ← vLLM + PyTorch + pip ROCm SDK 构建
 ├── .env.template          ← 环境变量模板
 ├── glados.py              ← CLI 客户端（纯标准库 REPL）
 ├── docs/
@@ -103,8 +97,7 @@ vllm/
 │   ├── LLM.md             ← 文本大模型详细部署指南
 │   └── ASR.md             ← 语音识别详细部署指南
 ├── scripts/
-│   ├── patch_strix.py     ← gfx1151 适配补丁 (20 个)
-│   ├── install_rocm_sdk.sh ← ROCm SDK 环境配置
+│   ├── patch_strix.py     ← gfx1151 适配补丁 (18 个)
 │   ├── vllm_profile_cache.py ← profile 缓存优化
 │   └── dump_logs.sh       ← 日志诊断导出
 └── test/
@@ -120,15 +113,15 @@ vllm/
 
 | 层 | 组件 | 版本 |
 |---|------|------|
-| 推理引擎 | vLLM | v0.20.0 |
-| ROCm SDK | TheRock ROCm 7.13 nightly | gfx1151 |
+| 推理引擎 | vLLM | v0.20.1 |
+| ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
 | PyTorch | torch + triton | 2.10 + 3.6 |
 | 量化 | AWQ-INT4 W4A16 g32 (compressed-tensors) | — |
-| 注意力 | AOTriton (预编译 gfx1151 核) + Triton SDPA | — |
-| 推测解码 | DFlash N=8 | z-lab/Qwen3.6-27B-DFlash |
+| 注意力 | Triton SDPA (JIT 运行时编译) | — |
 
 ## 已知限制
 
+- **AOTriton**：Ubuntu 26.04 自带 CMake 4.2，AOTriton 构建不兼容，改用 Triton JIT 运行时编译
 - **Flash-Attention（Dao-AILab）**：gfx1151 上编译失败，使用 Triton SDPA 路径
 - **AITER 自定义核**：CDNA 专属指令（DPP/向量打包）在 RDNA 上不存在
 - **HIP Graph**：gfx1151 上的冻结类问题，使用 `--enforce-eager`

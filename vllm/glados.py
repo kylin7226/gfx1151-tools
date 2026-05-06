@@ -16,9 +16,6 @@ Three rates are reported, each with a clear meaning:
                   delta from /metrics. The engine's own ground-truth decode
                   speed, unaffected by HTTP buffering or thinking time.
 
-Plus DFlash acceptance metrics from /metrics (drafted, accepted, acceptance %,
-mean accepted tokens per round, position-0 acceptance).
-
 Single file, stdlib only, no deps.
 
 Usage:
@@ -225,47 +222,7 @@ def stream_chat(prompt, host, model, max_tokens=4096, temperature=0):
 
 
 # ----------------------------------------------------------------------- render
-
-def _per_pos_accept_deltas(before, after):
-    """Return list of accepted-tokens-per-position deltas (position 0..N-1)."""
-    if not before or not after:
-        return []
-    out = []
-    for pos in range(20):  # generous upper bound; vLLM caps at num_speculative_tokens
-        key = f'vllm:spec_decode_num_accepted_tokens_per_pos_total{{engine="0",model_name="Qwen3.6-27B-AWQ4",position="{pos}"}}'
-        # Our parse_prom strips labels - that means values are summed across positions, useless.
-        # We need to re-parse here including position labels.
-        pass  # see fetch_per_pos below
-    return out
-
-
-def fetch_per_pos(host: str) -> dict[int, float]:
-    """Specialized parser that keeps the position label intact."""
-    try:
-        with urllib.request.urlopen(host + "/metrics", timeout=5) as r:
-            text = r.read().decode()
-    except Exception:
-        return {}
-    out: dict[int, float] = {}
-    for line in text.splitlines():
-        if not line.startswith("vllm:spec_decode_num_accepted_tokens_per_pos_total{"):
-            continue
-        # ...{...,position="N"} VALUE
-        try:
-            lbl_end = line.index("}")
-            labels = line[line.index("{") + 1:lbl_end]
-            value = float(line[lbl_end + 1:].strip().split()[0])
-            for kv in labels.split(","):
-                if kv.strip().startswith("position="):
-                    pos = int(kv.split("=")[1].strip().strip('"'))
-                    out[pos] = out.get(pos, 0.0) + value
-                    break
-        except (ValueError, IndexError):
-            continue
-    return out
-
-
-def print_stats(stats, metrics_before, metrics_after, per_pos_before, per_pos_after, client_estimate=None):
+def print_stats(stats, metrics_before, metrics_after, client_estimate=None):
     """One-line summary. Use --verbose for the full breakdown."""
     pt = stats["prompt_tokens"]
     ct = stats["completion_tokens"]
@@ -278,18 +235,9 @@ def print_stats(stats, metrics_before, metrics_after, per_pos_before, per_pos_af
     if metrics_before and metrics_after:
         gen_d = metric_delta(metrics_before, metrics_after, "vllm:generation_tokens_total")
         decode_d = metric_delta(metrics_before, metrics_after, "vllm:request_decode_time_seconds_sum")
-        accepted_d = metric_delta(metrics_before, metrics_after, "vllm:spec_decode_num_accepted_tokens_total")
-        drafted_d = metric_delta(metrics_before, metrics_after, "vllm:spec_decode_num_draft_tokens_total")
-        rounds_d = metric_delta(metrics_before, metrics_after, "vllm:spec_decode_num_drafts_total")
-
         if decode_d > 0 and gen_d > 0:
             vllm_tps = gen_d / decode_d
             parts.append(f"{DIM}vLLM{RESET} {_color_for_tps(vllm_tps)}{vllm_tps:.1f}{RESET}")
-        if drafted_d > 0 and rounds_d > 0:
-            n_inferred = int(round(drafted_d / rounds_d))
-            acc_pct = (accepted_d / drafted_d) * 100
-            acc_color = GREEN if acc_pct >= 60 else (YELLOW if acc_pct >= 40 else RED)
-            parts.append(f"{DIM}DFlash N={n_inferred} acc{RESET} {acc_color}{acc_pct:.0f}%{RESET}")
 
     print(f"\n{DIM}---{RESET} " + f" {DIM}·{RESET} ".join(parts))
 
@@ -313,7 +261,6 @@ def render_one(prompt, host, model, show_thinking=True, scrape_metrics=True):
     client_estimate = None
 
     metrics_before = fetch_prom_metrics(host) if scrape_metrics else None
-    per_pos_before = fetch_per_pos(host) if scrape_metrics else None
 
     try:
         for kind, payload in stream_chat(prompt, host, model):
@@ -339,8 +286,7 @@ def render_one(prompt, host, model, show_thinking=True, scrape_metrics=True):
                     print(f"\n{MAGENTA}</thinking>{RESET}")
                     in_thinking = False
                 metrics_after = fetch_prom_metrics(host) if scrape_metrics else None
-                per_pos_after = fetch_per_pos(host) if scrape_metrics else None
-                print_stats(payload, metrics_before, metrics_after, per_pos_before, per_pos_after, client_estimate)
+                print_stats(payload, metrics_before, metrics_after, client_estimate)
     except KeyboardInterrupt:
         print(f"\n{DIM}(aborted by user){RESET}")
     except urllib.error.URLError as e:
@@ -349,29 +295,12 @@ def render_one(prompt, host, model, show_thinking=True, scrape_metrics=True):
     return True
 
 
-def _slow_print(text, color="", per_char_delay=0.001, per_line_delay=0.015):
-    """Print with a typewriter effect. Faster per-char, slower between lines."""
-    for line in text.splitlines():
-        if color:
-            sys.stdout.write(color)
-        for ch in line:
-            sys.stdout.write(ch)
-            sys.stdout.flush()
-            if ch != " ":
-                time.sleep(per_char_delay)
-        if color:
-            sys.stdout.write(RESET)
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-        time.sleep(per_line_delay)
-
-
 def repl(host, model, show_thinking, scrape_metrics):
     import random
-    _slow_print(APERTURE_LOGO, color=ORANGE, per_char_delay=0.0008, per_line_delay=0.02)
-    _slow_print("  APERTURE SCIENCE COMPUTER-AIDED ENRICHMENT CENTER", color=BOLD + ORANGE, per_char_delay=0.005, per_line_delay=0.05)
-    _slow_print(f"  Welcome to GLaDOS, powered by Qwen 3.6-27B (AWQ-INT4) + DFlash on AMD Strix Halo.", color=DIM + ORANGE, per_char_delay=0.003, per_line_delay=0.05)
-    _slow_print(f"  {random.choice(GLADOS_QUOTES)}", color=DIM, per_char_delay=0.005, per_line_delay=0.05)
+    print(ORANGE + APERTURE_LOGO + RESET)
+    print(f"  {BOLD + ORANGE}APERTURE SCIENCE COMPUTER-AIDED ENRICHMENT CENTER{RESET}")
+    print(f"  {DIM + ORANGE}Welcome to GLaDOS, powered by Qwen 3.6-27B (AWQ-INT4) on AMD Strix Halo.{RESET}")
+    print(f"  {DIM}{random.choice(GLADOS_QUOTES)}{RESET}")
     print()
     print(f"  {BOLD}qwen-cli{RESET} -> {CYAN}{host}{RESET} ({DIM}{model}{RESET})")
     try:
@@ -439,13 +368,9 @@ def quick_bench(host, model, scrape_metrics):
             if m_before and m_after:
                 gen_d = metric_delta(m_before, m_after, "vllm:generation_tokens_total")
                 dec_d = metric_delta(m_before, m_after, "vllm:request_decode_time_seconds_sum")
-                drf_d = metric_delta(m_before, m_after, "vllm:spec_decode_num_draft_tokens_total")
-                acc_d = metric_delta(m_before, m_after, "vllm:spec_decode_num_accepted_tokens_total")
                 if dec_d > 0 and gen_d > 0:
                     vllm_tps = gen_d / dec_d
                     line += f"  {DIM}|{RESET}  {_color_for_tps(vllm_tps)}{vllm_tps:.1f} t/s{RESET} (vLLM)"
-                if drf_d > 0:
-                    line += f"  {DIM}|{RESET}  {(acc_d / drf_d * 100):.0f}% acc"
             line += f"  {DIM}({last['completion_tokens']} tok in {last['decode_s']:.1f}s, ttft {last['ttft_s']:.2f}s){RESET}"
             print(line)
             rows.append((name, last["wall_tps"], last["delivery_tps"]))

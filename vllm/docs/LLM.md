@@ -1,6 +1,6 @@
 # Qwen3.6-27B 文本大模型部署指南
 
-本项目通过 vLLM 提供 OpenAI 兼容的 API，服务 Qwen 3.6-27B AWQ-INT4 量化模型，支持 DFlash 推测解码。
+本项目通过 vLLM 提供 OpenAI 兼容的 API，服务 Qwen 3.6-27B AWQ-INT4 量化模型。
 
 ## 架构概览
 
@@ -11,9 +11,7 @@
 │  ┌──────────────────────────────────────────┐    │
 │  │  vllm (8000)                             │    │
 │  │  Qwen3.6-27B-AWQ-INT4                    │    │
-│  │  + z-lab/Qwen3.6-27B-DFlash (drafter)   │    │
 │  │  文本 LLM · 256K 上下文 · 视觉 · 工具   │    │
-│  │  DFlash N=8 推测解码                     │    │
 │  └──────────────────────────────────────────┘    │
 │                    │                              │
 │              128 GB UMA                           │
@@ -21,7 +19,7 @@
 └──────────────────────────────────────────────────┘
 ```
 
-单一服务，端口 8000。Docker 镜像 `rocm_gfx1151_vllm:v0.20.0`，vLLM v0.20.0 从源码构建 + 20 个补丁。
+单一服务，端口 8000。Docker 镜像 `rocm_gfx1151_vllm:v0.20.1`，vLLM v0.20.1 从源码构建 + 17 个补丁。
 
 ## 模型信息
 
@@ -32,29 +30,14 @@
 | 量化方案 | AWQ-INT4, W4A16, group_size 32, compressed-tensors |
 | 磁盘占用 | ~14 GiB |
 | 视觉塔 | 保留 BF16（未参与量化） |
-| DFlash 推测器 | `z-lab/Qwen3.6-27B-DFlash` (~2B BF16, Gated) |
-| 推测器磁盘 | ~3.3 GiB |
 
 ### 性能指标
 
 | 指标 | 值 |
 |---|---|
-| 单流峰值解码 | 24.8 t/s (DFlash N=8) |
-| 单流均值解码 | 18.5 t/s |
-| 无推测基线 | 5.6 t/s |
-| 提升幅度 | +340% |
+| 单流解码（基线） | ~5.6 t/s |
 | Prefill 平均 | 33-38 t/s |
 | Prefill 瞬时峰值 | 100-400 t/s |
-| 三流聚合峰值 | 41 t/s (~13.5 t/s/流) |
-
-### DFlash 接受率
-
-| 推测 token 数 N | 均值接受/轮 | 接受率 | 每流 t/s |
-|---|---|---|---|
-| 0 (无推测) | n/a | n/a | 5.64 |
-| 1 | 1.52 | 52% | 8.95 |
-| 4 | 3.20 | 64% | 17.92 |
-| 8 | 5.64-6.35 | 51-67% | 19.80 (chat) / 24.80 (responses) |
 
 ## 端点
 
@@ -87,22 +70,12 @@ cat /sys/class/drm/card1/device/mem_info_gtt_total
 # 期望值：~124554670080（≈ 116 GiB）
 ```
 
-### 3. 接受 HuggingFace Gated 模型条款
-
-DFlash 推测器是 gated model，需要先登录并接受条款：
-
-- https://huggingface.co/z-lab/Qwen3.6-27B-DFlash
-
-目标模型 `cyankiwi/Qwen3.6-27B-AWQ-INT4` 是公开的，无需接受。
-
-### 4. 下载模型
+### 3. 下载模型
 
 ```bash
 export $(grep -E '^(HF_TOKEN|VLLM_HOST_MODELS_DIR)=' .env | xargs)
-HF_HUB_ENABLE_HF_TRANSFER=1 hf download cyankiwi/Qwen3.6-27B-AWQ-INT4 --cache-dir "$VLLM_HOST_MODELS_DIR/hub" &
-HF_HUB_ENABLE_HF_TRANSFER=1 hf download z-lab/Qwen3.6-27B-DFlash       --cache-dir "$VLLM_HOST_MODELS_DIR/hub" &
-wait
-# ~14 GB 目标 + ~3.3 GB 推测器
+HF_HUB_ENABLE_HF_TRANSFER=1 hf download cyankiwi/Qwen3.6-27B-AWQ-INT4 --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
+# ~14 GB
 ```
 
 ### 5. 配置 .env
@@ -125,7 +98,6 @@ HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx              # HF 令牌
 VLLM_MAX_NUM_SEQS=1          # 并发流数
 VLLM_MAX_MODEL_LEN=262144    # 上下文长度（256K 原生）
 VLLM_GPU_MEMORY_UTIL=0.9     # 显存利用率
-VLLM_DFLASH_N=8             # 推测 token 数
 ```
 
 ## 构建镜像
@@ -140,10 +112,11 @@ docker compose build
 
 | 步骤 | 内容 | 耗时 |
 |---|---|---|
-| 1-2 | 系统依赖 + TheRock ROCm 7.13 nightly | ~5 min |
+| 1-2 | 系统依赖 + pip ROCm SDK 7.13 nightly | ~5 min |
 | 3-4 | Python venv + PyTorch/torchaudio/triton | ~5 min |
 | 5-6 | 构建工具 + Conch Triton kernels | ~3 min |
-| 7 | 克隆 vLLM v0.20.0 + 应用 20 个补丁 | ~2 min |
+| 7 | 克隆 vLLM v0.20.1 + 应用 17 个补丁 | ~2 min |
+| 7d | 编译 AWQ-INT4 MMQ HIP 核 | ~1 min |
 | 8 | 编译 vLLM（MAX_JOBS=4） | ~15-20 min |
 | 8b | 安装运行时依赖 | ~2 min |
 | 8c | 安装音频依赖（av, soundfile, scipy） | ~1 min |
@@ -219,11 +192,11 @@ docker run -d \
   -e MIOPEN_FIND_MODE=FAST \
   -e VLLM_SKIP_MEMORY_PROFILING=1 \
   -e VLLM_PROFILE_CACHE_DIR=/root/.cache/vllm-profile \
-  rocm_gfx1151_vllm:v0.20.0 \
+  rocm_gfx1151_vllm:v0.20.1 \
   vllm serve cyankiwi/Qwen3.6-27B-AWQ-INT4 \
     --host 0.0.0.0 --port 8000 \
     --served-model-name Qwen3.6-27B-AWQ4 \
-    --attention-backend ROCM_ATTN \
+    --attention-backend TRITON_ATTN \
     --mm-encoder-attn-backend TRITON_ATTN \
     --reasoning-parser qwen3 \
     --tool-call-parser qwen3_coder \
@@ -231,22 +204,20 @@ docker run -d \
     --enforce-eager \
     --gpu-memory-utilization 0.9 \
     --max-num-seqs 1 \
-    --max-model-len 262144 \
-    --speculative-config '{"method":"dflash","model":"z-lab/Qwen3.6-27B-DFlash","num_speculative_tokens":8}'
+    --max-model-len 262144
 ```
 
 **关键参数说明：**
 
 | 参数 | 说明 |
 |---|---|
-| `--attention-backend ROCM_ATTN` | DFlash 推测解码需要，支持 non-causal |
+| `--attention-backend TRITON_ATTN` | RDNA 3.5 上性能优于 ROCM_ATTN |
 | `--mm-encoder-attn-backend TRITON_ATTN` | 视觉编码器使用 Triton 注意力（TORCH_SDPA 会产生 NaN） |
 | `--reasoning-parser qwen3` | 解析 `` 推理 token |
 | `--tool-call-parser qwen3_coder` | 工具调用解析 |
 | `--enforce-eager` | 禁用 HIP 图捕获（gfx1151 上会冻结） |
 | `--gpu-memory-utilization` | UMA 池利用率上限 |
 | `--max-model-len` | 最大上下文长度，256K 原生 |
-| `--speculative-config` | DFlash 推测解码配置 |
 
 **注意：** 不要传 `--quantization` 参数。vLLM 会自动从 `config.json` 检测 compressed-tensors 并路由到 AWQMarlinLinearMethod。显式传入可能导致回退到慢速的 `ops.awq_gemm` 路径。
 
@@ -283,11 +254,11 @@ environment:
 
 ```bash
 # 确保已安装 vLLM 和依赖
-uv pip install vllm==0.20.0
+uv pip install vllm==0.20.1
 
 # 直接启动
 vllm serve cyankiwi/Qwen3.6-27B-AWQ-INT4 \
-  --attention-backend ROCM_ATTN \
+  --attention-backend TRITON_ATTN \
   --mm-encoder-attn-backend TRITON_ATTN \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
@@ -402,7 +373,7 @@ curl http://127.0.0.1:8000/v1/responses \
   }'
 ```
 
-> Patch 15 确保 `chat_template_kwargs` 通过 Responses API 流式路径正确传递。
+> Patch 13 确保 `chat_template_kwargs` 通过 Responses API 流式路径正确传递。
 
 ### 带图像的聊天
 
@@ -502,16 +473,6 @@ with httpx.Client(timeout=300.0) as client:
 3. 第二次启动会读取 profile 缓存，降到 ~95 秒
 4. 如果修改了 `max_model_len`、`gpu_memory_utilization` 等配置，会重新 profile（缓存 key 变了）
 
-### 问题：DFlash 推测解码输出异常
-
-**原因：** DFlash 上游仍在活跃开发，可能有输出质量 bug。
-
-**解决：**
-1. 先试 `num_speculative_tokens=1` 确认基线正确
-2. 逐步增加到 N=4, N=8
-3. 查看引擎日志中的 acceptance rate
-4. 如果仍有问题，可以暂时关闭推测解码（移除 `--speculative-config`）
-
 ### 问题：工具调用在流式模式下不完整
 
 **原因：** 上游流式工具调用解析器有 bug（vLLM PRs #40783, #40785, #40787 未合并）。
@@ -523,14 +484,3 @@ with httpx.Client(timeout=300.0) as client:
 **原因：** 视觉编码器使用了错误的注意力后端。
 
 **解决：** 确保 `--mm-encoder-attn-backend TRITON_ATTN` 已设置。TORCH_SDPA 在 gfx1151 上会产生 NaN/Inf。
-
-### 问题：DFlash 工作线程在客户端断开后卡死
-
-**症状：** API 服务器响应但新请求超时，EngineCore CPU 占用 79-200%。
-
-**恢复：** `docker compose restart rocm_gfx1151_vllm`（约 9 分钟冷启动）。重启前运行 `./scripts/dump_logs.sh stuck-state` 保存诊断信息。
-
-**缓解措施：**
-- 客户端超时设置要大于预期解码时间
-- 避免 `SIGKILL` 客户端，使用 `SIGINT` 或等待正常完成
-- 长上下文请求（>10K prompt tokens）先用 N=1 测试

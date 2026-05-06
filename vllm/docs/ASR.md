@@ -12,7 +12,7 @@ Qwen3-ASR 是 Qwen 系列的纯语音识别模型（~8B 参数，17 种语言）
 │  │  vllm (8000)     │   │  vllm-asr (8001) │     │
 │  │  Qwen3.6-27B     │   │  Qwen3-ASR-8B    │     │
 │  │  文本 LLM        │   │  语音识别        │     │
-│  │  DFlash + vision │   │  3 种模式        │     │
+│  │  文本 LLM + vision │   │  3 种模式        │     │
 │  └──────────────────┘   └──────────────────┘     │
 │         │                      │                  │
 │         └──────────┬───────────┘                  │
@@ -21,7 +21,7 @@ Qwen3-ASR 是 Qwen 系列的纯语音识别模型（~8B 参数，17 种语言）
 └──────────────────────────────────────────────────┘
 ```
 
-两个服务共享同一 Docker 镜像（`rocm_gfx1151_vllm:v0.20.0`），但使用不同的模型和端口，各自独立进程。vLLM 不支持单实例同时加载文本 LLM 和 ASR 模型。
+两个服务共享同一 Docker 镜像（`rocm_gfx1151_vllm:v0.20.1`），但使用不同的模型和端口，各自独立进程。vLLM 不支持单实例同时加载文本 LLM 和 ASR 模型。
 
 ### 三种调用模式
 
@@ -95,13 +95,14 @@ docker compose build
 
 | 步骤 | 内容 | 耗时 |
 |---|---|---|
-| 1-2 | 系统依赖 + TheRock ROCm 7.13 nightly | ~5 min |
+| 1-2 | 系统依赖 + pip ROCm SDK 7.13 nightly | ~5 min |
 | 3-4 | Python venv + PyTorch/torchaudio/triton | ~5 min |
 | 5-6 | 构建工具 + Conch Triton kernels | ~3 min |
-| 7 | 克隆 vLLM v0.20.0 + 应用 20 个补丁 | ~2 min |
-| 8 | 编译 vLLM（MAX_JOBS=4） | ~15-20 min |
-| 8b | 安装运行时依赖（含 av, soundfile, scipy） | ~2 min |
-| 8c | 安装音频依赖（PyAV bundles FFmpeg） | ~1 min |
+| 7 | 克隆 vLLM v0.20.1 + 应用 18 个补丁 | ~2 min |
+| 7d | 编译 AWQ-INT4 MMQ HIP 核 | ~1 min |
+| 8 | 编译 vLLM（MAX_JOBS=8） | ~10-15 min |
+| 8b | 安装运行时依赖 | ~2 min |
+| 8c | 安装音频依赖（av, soundfile, scipy） | ~1 min |
 
 ### 仅修改补丁后重新构建
 
@@ -182,7 +183,7 @@ docker run -d \
   -e VLLM_MAX_AUDIO_CLIP_FILESIZE_MB=25 \
   -e VLLM_SKIP_MEMORY_PROFILING=1 \
   -e VLLM_PROFILE_CACHE_DIR=/root/.cache/vllm-profile \
-  rocm_gfx1151_vllm:v0.20.0 \
+  rocm_gfx1151_vllm:v0.20.1 \
   vllm serve Qwen/Qwen3-ASR-8B \
     --host 0.0.0.0 --port 8000 \
     --supported-tasks transcription,realtime \
@@ -222,7 +223,7 @@ environment:
 或使用 docker 运行时覆盖：
 
 ```bash
-docker run ... -e VLLM_LOGGING_LEVEL=DEBUG rocm_gfx1151_vllm:v0.20.0 vllm serve ...
+docker run ... -e VLLM_LOGGING_LEVEL=DEBUG rocm_gfx1151_vllm:v0.20.1 vllm serve ...
 ```
 
 > **警告**：`DEBUG` 级别会使每个 op 都格式化参数为字符串，导致推理慢 20-100 倍。仅用于调试，不要在生产环境使用。
@@ -233,7 +234,7 @@ docker run ... -e VLLM_LOGGING_LEVEL=DEBUG rocm_gfx1151_vllm:v0.20.0 vllm serve 
 
 ```bash
 # 确保已安装 vLLM 和音频依赖
-uv pip install vllm==0.20.0 av soundfile scipy
+uv pip install vllm==0.20.1 av soundfile scipy
 
 # 直接启动
 vllm serve Qwen/Qwen3-ASR-8B \

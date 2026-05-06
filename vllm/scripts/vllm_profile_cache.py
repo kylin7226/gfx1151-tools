@@ -27,8 +27,6 @@ _FINGERPRINT_KEYS = [
     ("scheduler_config", "max_num_seqs"),
     ("cache_config", "block_size"),
     ("cache_config", "cache_dtype"),
-    ("speculative_config", "method"),
-    ("speculative_config", "model"),
 ]
 
 

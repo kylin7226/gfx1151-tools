@@ -1,7 +1,6 @@
-"""Long-context (~25K token) DFlash test using REAL .research findings as
-source material. Asks the model a hard synthesis question that requires
-pulling specific facts from at least 3 different findings files. Tests
-both throughput at long context AND answer quality.
+"""Long-context (~25K token) test. Feeds the model a large synthesized
+text passage and asks a comprehension question. Tests throughput at
+long context AND answer quality.
 
 Run: python3 test/bench_longctx.py
 Output: test/bench_longctx_result.json
@@ -13,37 +12,36 @@ import json
 import time
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 HOST = "http://127.0.0.1:8000"
 MODEL = "Qwen3.6-27B-AWQ4"
 TIMEOUT = 1800
 
-RESEARCH = Path(__file__).parent.parent / ".research"
-OUT = Path(__file__).parent / "bench_longctx_result.json"
+# A long synthetic passage to exercise the context window.
+# Repeated ~200 times to produce ~25K tokens of input.
+PASSAGE = """
+The unified memory architecture of the AMD Strix Halo platform enables large
+language model inference that would traditionally require discrete GPUs with
+dedicated VRAM. The iGPU shares the same physical DRAM as the CPU, which
+eliminates the host-to-device transfer overhead that discrete GPUs incur.
+For LLM inference, this enables loading models that exceed traditional GPU
+VRAM budgets - a 27B parameter model in 4-bit AWQ quantization fits easily
+within the 128 GB memory budget. The ROCm software stack provides the necessary
+compiler support for RDNA 3.5 architecture targets, with attention backends
+implemented via Triton JIT compilation at runtime. The vLLM inference engine
+handles paged KV cache management, automatic chunked prefill, and OpenAI
+compatible API serving. Profile caching reduces cold start time from roughly
+9 minutes to approximately 95 seconds on subsequent restarts.
+""".strip()
 
+QUESTION = """
+Based on the passage above, answer the following:
 
-# Curated set of FINDINGS files most relevant to the synthesis question.
-# Total ~21K tokens of input + the question + reasoning -> closer to 25K total.
-SOURCES = [
-    "vllm-dflash-prs/FINDINGS.md",
-    "vllm-attention-api/FINDINGS.md",
-    "dflash-paper-math/FINDINGS.md",
-    "rdna35-isa-triton/FINDINGS.md",
-    "dflash-ddtree-spark/FINDINGS.md",
-]
+1. What advantage does unified memory provide for LLM inference compared to discrete GPUs?
+2. How much memory does a 27B parameter AWQ-quantized model require?
+3. What reduces cold start time from 9 minutes to ~95 seconds?
 
-
-SYNTHESIS_QUESTION = """
-Based ONLY on the research findings provided above, answer ALL three questions below with specific citations. For each fact, name the SOURCE FILE you got it from (e.g. "per vllm-dflash-prs/FINDINGS.md"). Do not invent facts not present in the findings. If a finding is silent on a question, say so explicitly.
-
-Q1. PR #40176 was merged to vllm-project/vllm:main on 2026-04-22 (merge commit 6d09769700) but was NOT included in the v0.20.0 release tag (101584af0). Explain (a) the most likely mechanism by which this happened (release branch logistics), (b) the four files that the PR modified, and (c) for each file, name the specific change required to enable DFlash non-causal attention on gfx1151.
-
-Q2. The DFlash drafter z-lab/Qwen3.6-27B-DFlash has interleaved sliding-window attention layers. Identify TWO distinct correctness bugs that would manifest if vLLM v0.20.0 (without PR #40898) attempted to load this drafter. For each bug, cite the specific code path / function affected.
-
-Q3. On AMD Strix Halo / gfx1151 (RDNA 3.5), explain the relationship between (a) Triton's tl.dot lowering, (b) the WMMA hardware instructions available to gfx1151, and (c) why the ROCM_ATTN backend works without architecture gating but the ROCM_AITER_FA backend does NOT. Cite specific instruction names where applicable.
-
-Be concise. Do not pad.
+Be concise.
 """.strip()
 
 
@@ -59,11 +57,8 @@ def post(path, body, timeout=TIMEOUT):
 
 
 def build_context() -> str:
-    parts = ["# Research findings for synthesis question\n"]
-    for src in SOURCES:
-        path = RESEARCH / src
-        parts.append(f"\n\n========================================\n## SOURCE FILE: {src}\n========================================\n")
-        parts.append(path.read_text())
+    """Repeat the passage to build ~25K tokens of context."""
+    parts = [PASSAGE] * 200
     return "\n".join(parts)
 
 
@@ -73,12 +68,11 @@ def main():
     args = ap.parse_args()
 
     context = build_context()
-    prompt = f"{context}\n\n========================================\n## QUESTION\n========================================\n\n{SYNTHESIS_QUESTION}"
+    prompt = f"{context}\n\n{QUESTION}"
     chars = len(prompt)
     est_tokens = chars // 4
     print(f"Context: {chars:,} chars, ~{est_tokens:,} tokens (4 chars/token rough estimate)")
-    print(f"Sources: {len(SOURCES)} findings files")
-    print(f"Asking 3 synthesis questions, max_tokens={args.max_tokens}")
+    print(f"Asking comprehension question, max_tokens={args.max_tokens}")
     print()
 
     body = {
@@ -103,25 +97,24 @@ def main():
     finish = data["choices"][0].get("finish_reason")
 
     decode_tps = ct / wall if wall else 0
-    # Effective end-to-end (includes prefill of 25K tokens):
     e2e_tps = ct / (t1 - t0) if (t1 - t0) else 0
 
     print(f"=== Long-context result ===")
     print(f"  prompt_tokens (actual): {pt}")
-    print(f"  completion_tokens:     {ct}")
-    print(f"  reasoning_chars:       {len(reasoning)}")
-    print(f"  wall:                  {wall:.2f}s")
-    print(f"  finish_reason:         {finish}")
-    print(f"  decode t/s:            {decode_tps:.2f}")
-    print(f"  e2e t/s:               {e2e_tps:.2f}")
-    print()
-    print("=== Reasoning (first 1000 chars) ===")
-    print(reasoning[:1000])
+    print(f"  completion_tokens:      {ct}")
+    print(f"  reasoning_chars:        {len(reasoning)}")
+    print(f"  wall:                   {wall:.2f}s")
+    print(f"  finish_reason:          {finish}")
+    print(f"  decode t/s:             {decode_tps:.2f}")
+    print(f"  e2e t/s:                {e2e_tps:.2f}")
     print()
     print("=== Answer (first 2000 chars) ===")
     print(content[:2000])
 
-    OUT.write_text(json.dumps({
+    import json as _json
+    from pathlib import Path
+    out = Path(__file__).parent / "bench_longctx_result.json"
+    out.write_text(_json.dumps({
         "prompt_chars": chars,
         "prompt_tokens": pt,
         "completion_tokens": ct,
@@ -132,10 +125,8 @@ def main():
         "finish_reason": finish,
         "reasoning": reasoning,
         "content": content,
-        "sources_used": SOURCES,
-        "question": SYNTHESIS_QUESTION,
     }, indent=2))
-    print(f"\n=== Saved to {OUT} ===")
+    print(f"\n=== Saved to {out} ===")
 
 
 if __name__ == "__main__":
