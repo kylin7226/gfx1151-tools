@@ -44,20 +44,6 @@ class RocmMmqQ4LinearKernel(MPLinearKernel):
 
     @classmethod
     def can_implement(cls, c: MPLinearLayerConfig) -> tuple[bool, str | None]:
-        # Verbose debug: log every can_implement call with the full config.
-        import logging
-        _log = logging.getLogger(__name__)
-        _log.warning(
-            "RocmMmqQ4.can_implement called: full=%s partition=%s wt=%s act=%s g=%d zp=%s gidx=%s",
-            c.full_weight_shape, c.partition_weight_shape, c.weight_type,
-            c.act_type, c.group_size, c.zero_points, c.has_g_idx,
-        )
-        result = cls._can_implement_inner(c)
-        _log.warning("RocmMmqQ4.can_implement -> %s", result)
-        return result
-
-    @classmethod
-    def _can_implement_inner(cls, c: MPLinearLayerConfig) -> tuple[bool, str | None]:
         if not current_platform.is_rocm():
             return False, "RocmMmqQ4 targets ROCm only"
 
@@ -86,7 +72,6 @@ class RocmMmqQ4LinearKernel(MPLinearKernel):
                 f"group_size={c.group_size} not supported (only {GROUP_SIZE})",
             )
 
-        # Asymmetric quant (zero_points=True) supported via per-group zp tensor.
         if c.has_g_idx:
             return False, "activation reordering (g_idx) not supported"
 
@@ -96,9 +81,7 @@ class RocmMmqQ4LinearKernel(MPLinearKernel):
             return False, f"K={K} not divisible by group_size={GROUP_SIZE}"
         if N < MMQ_X:
             return False, f"N={N} smaller than MMQ_X tile ({MMQ_X})"
-        # M is variable per call; tail handling in the kernel covers any M >= 1.
 
-        # Verify the .so is importable (not just present on disk).
         try:
             import awq_mmq_gfx1151  # noqa: F401
         except ImportError as e:

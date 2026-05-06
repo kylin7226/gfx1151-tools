@@ -97,7 +97,7 @@ vllm/
 │   ├── LLM.md             ← 文本大模型详细部署指南
 │   └── ASR.md             ← 语音识别详细部署指南
 ├── scripts/
-│   ├── patch_strix.py     ← gfx1151 适配补丁 (18 个)
+│   ├── patch_strix.py     ← gfx1151 适配补丁 (19 个)
 │   ├── vllm_profile_cache.py ← profile 缓存优化
 │   └── dump_logs.sh       ← 日志诊断导出
 └── test/

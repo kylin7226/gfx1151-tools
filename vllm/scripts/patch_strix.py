@@ -1,7 +1,7 @@
 """
 Strix Halo (gfx1151) patch bundle for vLLM source builds.
 
-Applies 18 patches (numbered 1-18 sequentially) at build time to make
+Applies 19 patches (numbered 1-19 sequentially) at build time to make
 vLLM functional on RDNA 3.5 (gfx1151 / Strix Halo) where upstream
 support is incomplete.
 
@@ -24,6 +24,7 @@ Patch summary:
   16  profile_run cache (gpu_worker.py — skip ~7 min on restart)
   17  non-streaming /v1/responses enable_thinking=false fix (serving.py)
   18  Triton softmax segments tuning 16→32 (triton_attn.py)
+  19  Triton SDPA shared memory cap for gfx11 (triton_unified_attention.py)
 
 Categories (for reference/reuse):
   Hardware enablement:  1-3    (ROCm APUs, gfx1151-specific)
@@ -31,7 +32,7 @@ Categories (for reference/reuse):
   ROCm SDK bugs:        10-12  (MoE cap, VRAM clamp, hipCtx deprecation)
   Upstream candidates:  13,17  (generic vLLM bugs, not gfx1151-specific)
   Local features:       14-16  (AWQ MMQ, profile cache, gfx1151 tuning)
-  gfx1151 performance:  18     (softmax segment tuning)
+  gfx1151 performance:  18-19  (softmax tuning, Triton LDS caps)
 
 Historical mapping (old → new):
   1   → 1,  1.25 → 2,  1.5 → 3,  2 → 4,  3 → 5,  3.5 → 6
@@ -784,6 +785,66 @@ except Exception:
         if applied:
             p_triton_attn.write_text(txt)
             print(" -> Patched vllm/v1/attention/backends/triton_attn.py (Patch 18: gfx1151 softmax segments 16→32)")
+
+    # Patch 19 (ROCm/vllm gfx11 PR #919, #911): cap Triton SDPA shared memory
+    # usage on gfx11 (RDNA 3/3.5) to prevent OutOfResources errors.
+    #
+    # RDNA3 LDS (shared memory) is 64 KB per CU. The unified attention kernel's
+    # Q-tile = BLOCK_M * head_size * element_size can exceed this for large
+    # head_size (>= 256) or when the autotuner picks BLOCK_M=128 with
+    # head_size >= 256.
+    #
+    # Upstream commits: 8943cfb2 (TILE_SIZE cap), 2e4ab9fe (BLOCK_M + stages).
+    p_unified = Path('vllm/v1/attention/ops/triton_unified_attention.py')
+    if p_unified.exists():
+        txt = p_unified.read_text()
+
+        # 19a: Add on_gfx1x import.
+        if "from vllm.platforms.rocm import on_gfx1x" not in txt:
+            txt = txt.replace(
+                "from vllm.platforms import current_platform",
+                "from vllm.platforms import current_platform\nfrom vllm.platforms.rocm import on_gfx1x",
+                1,
+            )
+            print(" -> Patched triton_unified_attention.py (19a: import on_gfx1x)")
+
+        # 19b: Cap BLOCK_M / max_num_stages / TILE_SIZE after they are computed
+        #      but before the kernel launch.
+        #
+        # Injection point: right after the TILE_SIZE_DECODE assignment line.
+        inject_after = "    TILE_SIZE_DECODE = _get_tile_size(\n        head_size, sliding_window_val, q.element_size(), is_prefill=False\n    )"
+        injection = (
+            inject_after
+            + "\n"
+            + """
+    # --- Strix Halo Patch 19b: gfx11 shared memory (LDS) caps ---
+    # RDNA3 LDS = 64 KB. Q-tile = BLOCK_M * head_size * element_size must fit
+    # with headroom for K/V tiles and intermediate buffers.
+    element_size = q.element_size()
+    if on_gfx1x():
+        # Cap TILE_SIZE for large head_size to avoid 128 KB LDS requirement
+        # (TILE_SIZE=256 needs 128 KB for a single tile).
+        if head_size > 128:
+            TILE_SIZE_PREFILL = min(TILE_SIZE_PREFILL, 128)
+            TILE_SIZE_DECODE = min(TILE_SIZE_DECODE, 128)
+
+        # Dynamically cap BLOCK_M when Q-tile would exceed shared memory budget.
+        # Conservative budget: 16 KB for Q, leaving ~48 KB for K/V tiles +
+        # score/accumulator intermediates within the 64 KB LDS limit.
+        lds_budget = 65536  # bytes
+        q_tile_budget = lds_budget // 4  # 16 KB
+        q_tile_bytes = BLOCK_M * head_size * element_size
+        if q_tile_bytes > q_tile_budget:
+            max_block_m = q_tile_budget // (head_size * element_size)
+            BLOCK_M = max(16, triton.next_power_of_2(max_block_m) // 2)
+    # --- end Strix Halo Patch 19b ---"""
+        )
+
+        if "Strix Halo Patch 19b" not in txt and inject_after in txt:
+            txt = txt.replace(inject_after, injection, 1)
+            print(" -> Patched triton_unified_attention.py (19b: gfx11 BLOCK_M/TILE_SIZE caps)")
+
+        p_unified.write_text(txt)
 
     print("Successfully patched vLLM/Environment for Strix Halo.")
 

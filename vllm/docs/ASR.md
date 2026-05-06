@@ -98,7 +98,7 @@ docker compose build
 | 1-2 | 系统依赖 + pip ROCm SDK 7.13 nightly | ~5 min |
 | 3-4 | Python venv + PyTorch/torchaudio/triton | ~5 min |
 | 5-6 | 构建工具 + Conch Triton kernels | ~3 min |
-| 7 | 克隆 vLLM v0.20.1 + 应用 18 个补丁 | ~2 min |
+| 7 | 克隆 vLLM v0.20.1 + 应用 19 个补丁 | ~2 min |
 | 7d | 编译 AWQ-INT4 MMQ HIP 核 | ~1 min |
 | 8 | 编译 vLLM（MAX_JOBS=8） | ~10-15 min |
 | 8b | 安装运行时依赖 | ~2 min |

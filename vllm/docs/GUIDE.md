@@ -241,7 +241,7 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 ## 十、补丁说明
 
-项目对 vLLM v0.20.1 应用了 18 个补丁：
+项目对 vLLM v0.20.1 应用了 19 个补丁：
 
 | 补丁 | 来源 | 内容 |
 |---|---|---|
@@ -252,6 +252,7 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 | 16 | 本地 | 缓存 profile_run 结果，跳过 ~7 分钟内存分析 |
 | 17 | 本地 + PR #40334 | `combine_hidden_states` dtype 修复 + 非流式 `/v1/responses` enable_thinking 修复 |
 | 18 | ROCm/vllm gfx11 | Strix Halo softmax segments 调优（16→32） |
+| 19 | ROCm/vllm gfx11 | Triton SDPA 共享内存（LDS）溢出保护（BLOCK_M/TILE_SIZE 动态裁剪） |
 
 ## 十一、运行基准测试
 
