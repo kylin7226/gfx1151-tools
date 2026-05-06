@@ -1,13 +1,8 @@
-# rocm_gfx1151_vllm source-build image — Ubuntu 26.04 + ROCm 7.13 nightly (pip) + vLLM from source.
+# rocm_gfx1151_vllm source-build image — Ubuntu 26.04 + TheRock ROCm 7.13 nightly + vLLM from source.
 #
-# Builds vLLM 0.20.1+ against ROCm 7.13 nightly (pip-installed SDK) for AMD
-# Strix Halo (gfx1151 / RDNA 3.5). Target model: cyankiwi/Qwen3.6-27B-AWQ-INT4
+# Builds vLLM 0.20.1+ against TheRock ROCm 7.13 nightly for AMD Strix Halo
+# (gfx1151 / RDNA 3.5). Target model: cyankiwi/Qwen3.6-27B-AWQ-INT4
 # (compressed-tensors W4A16, group_size 32, vision tower preserved BF16).
-#
-# ROCm SDK installation: installed via `uv pip install rocm[devel,libraries]`
-# from the AMD v2-staging gfx1151 nightly index. This is lighter and more
-# reproducible than the TheRock tarball approach — paths are resolved at
-# site-packages rather than /opt/rocm. Follows the ROCm/vllm gfx11 CI pattern.
 #
 # Why this differs from vllm-qwen (BF16):
 #   - vLLM v0.20.1 is the current stable cut adding
@@ -43,12 +38,12 @@ FROM ubuntu:26.04
 # CI runners (ubuntu-24.04, 4 cores) can override via --build-arg.
 ARG MAX_JOBS=8
 
-# 1. Build + inference-runtime system deps (inference-only  -  no IB, no ffmpeg).
+# 1. Build + inference-runtime system deps (inference-only - no IB, no ffmpeg).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git \
       build-essential cmake ninja-build \
-      xz-utils \
+      aria2 tar xz-utils \
       libatomic1 libnuma-dev libgomp1 libelf1t64 \
       libdrm-dev zlib1g-dev libssl-dev \
       libgoogle-perftools4 \
@@ -57,25 +52,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. ROCm SDK via pip — lighter than TheRock tarball, paths in site-packages.
-# rocm-sdk init expands devel headers from a bundled tarball into _rocm_sdk_devel/.
-# Must create the venv BEFORE installing the ROCm SDK so that
-# _rocm_sdk_devel / _rocm_sdk_core land in the venv's site-packages (the
-# PATH / LD_LIBRARY_PATH / CMAKE_PREFIX_PATH variables below all reference
-# /opt/venv/… paths).
+# 2. TheRock ROCm SDK -> /opt/rocm. The install script resolves the latest
+# 7.13.0a nightly tarball at build time.
+WORKDIR /tmp
+ARG ROCM_MAJOR_VER=7
+ARG GFX=gfx1151
+COPY scripts/install_rocm_sdk.sh /tmp/install_rocm_sdk.sh
+RUN chmod +x /tmp/install_rocm_sdk.sh && \
+    ROCM_MAJOR_VER=${ROCM_MAJOR_VER} GFX=${GFX} /tmp/install_rocm_sdk.sh && \
+    rm /tmp/install_rocm_sdk.sh
+
+# 3. Python 3.12 venv via uv (Ubuntu 26.04 ships 3.14, no python3.12 apt pkg).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV VIRTUAL_ENV=/opt/venv
-ENV ROCM_SDK_INDEX=https://rocm.nightlies.amd.com/v2-staging/gfx1151/
+ENV PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
 RUN uv venv /opt/venv --python 3.12 && \
-    uv pip install --upgrade pip wheel packaging "setuptools<80.0.0" && \
-    uv pip install --pre "rocm[devel,libraries]" \
-      --index-url ${ROCM_SDK_INDEX} \
-      --extra-index-url https://pypi.org/simple && \
-    rocm-sdk init && \
-    hipcc --version
-
-# 3. PATH — ROCm SDK binaries in venv site-packages.
-ENV PATH=/opt/venv/bin:/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/bin:/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin:$PATH
+    uv pip install --upgrade pip wheel packaging "setuptools<80.0.0"
 
 # uv hardening — prevent download timeouts and hardlink failures in containers.
 ENV UV_HTTP_TIMEOUT=500 \
@@ -90,8 +82,7 @@ ENV UV_HTTP_TIMEOUT=500 \
 #   torchaudio   2.9.0 +rocm7.13.0a20260426
 #   triton       3.6.0 +rocm7.13.0a20260426
 RUN uv pip install --pre torch torchvision torchaudio \
-      --index-url ${ROCM_SDK_INDEX} \
-      --extra-index-url https://pypi.org/simple
+      --index-url https://rocm.nightlies.amd.com/v2-staging/gfx1151/
 
 WORKDIR /opt
 
@@ -99,7 +90,7 @@ WORKDIR /opt
 RUN uv pip install --upgrade cmake ninja packaging wheel numpy \
       "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
 
-# 6. Conch Triton kernels  -  required by vLLM's AWQMarlin-on-ROCm path
+# 6. Conch Triton kernels - required by vLLM's AWQMarlin-on-ROCm path
 # selected via choose_mp_linear_kernel (PR #36505). Without this, AWQ
 # falls back to the slow legacy ops.awq_gemm.
 RUN uv pip install conch-triton-kernels
@@ -129,39 +120,38 @@ RUN python /opt/vllm/patch_strix.py
 COPY scripts/vllm_profile_cache.py /opt/venv/lib/python3.12/site-packages/vllm_profile_cache.py
 
 # 7d. AWQ-INT4 MMQ HIP kernel source — Patch 16 registers this at runtime.
-# Build against pip-installed ROCm SDK (site-packages layout).
 COPY csrc/awq_mmq_gfx1151 /root/csrc/awq_mmq_gfx1151/
 WORKDIR /root/csrc/awq_mmq_gfx1151
-ENV ROCM_HOME=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
-    ROCM_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
-    HIP_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel
-RUN CC=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin/clang \
-    CXX=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin/clang++ \
+ENV ROCM_HOME=/opt/rocm \
+    ROCM_PATH=/opt/rocm \
+    HIP_PATH=/opt/rocm
+RUN CC=/opt/rocm/llvm/bin/clang \
+    CXX=/opt/rocm/llvm/bin/clang++ \
     python setup.py build_ext --inplace && \
     ls -la /root/csrc/awq_mmq_gfx1151/awq_mmq_gfx1151/*.so && \
     rm -rf build
 WORKDIR /opt/vllm
 
-# 8. Build vLLM against pip-installed ROCm SDK.
-# CC/CXX forced to ROCm clang from site-packages so the compiled extensions
-# have an ABI matching the torch wheels.
-ENV ROCM_HOME=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
-    ROCM_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
-    HIP_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
+# 8. Build vLLM against TheRock ROCm.
+# CC/CXX forced to ROCm clang so the compiled extensions have an ABI
+# matching the torch wheels.
+ENV ROCM_HOME=/opt/rocm \
+    ROCM_PATH=/opt/rocm \
+    HIP_PATH=/opt/rocm \
     HIP_PLATFORM=amd \
-    CMAKE_PREFIX_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel \
+    CMAKE_PREFIX_PATH=/opt/rocm \
     VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=gfx1151 \
     HIP_ARCHITECTURES=gfx1151 \
     GPU_TARGETS=gfx1151 \
     AMDGPU_TARGETS=gfx1151 \
     MAX_JOBS=${MAX_JOBS} \
-    CC=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin/clang \
-    CXX=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin/clang++
+    CC=/opt/rocm/llvm/bin/clang \
+    CXX=/opt/rocm/llvm/bin/clang++
 
-RUN export HIP_DEVICE_LIB_PATH=$(find /opt/venv/lib/python3.12/site-packages/_rocm_sdk_core -type d -name bitcode -print -quit) && \
+RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
     echo "Building with bitcode: $HIP_DEVICE_LIB_PATH" && \
-    export CMAKE_ARGS="-DROCM_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
+    export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
     uv pip install --no-build-isolation --no-deps .
 
 # 8b. vLLM runtime dependencies.
@@ -186,12 +176,12 @@ RUN TORCH_VER=$(python -c "import torch; print(torch.__version__)") && \
 # an alternative resampler. pybase64 is already in common.txt.
 RUN uv pip install av soundfile scipy
 
-# 9. Runtime env. Mirrors pip ROCm SDK layout for non-interactive use.
+# 9. Runtime env. Mirrors /etc/profile.d/rocm-sdk.sh for non-interactive use.
 # These are the env vars our research found load-bearing for AWQ vision
-# on gfx1151  -  see .research/flashattention-strix-halo and
+# on gfx1151 - see .research/flashattention-strix-halo and
 # .research/vllm-strix-halo-issues for the per-flag justification.
-ENV LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib:/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib:/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/lib \
-    HIP_CLANG_PATH=/opt/venv/lib/python3.12/site-packages/_rocm_sdk_core/lib/llvm/bin \
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:/opt/rocm/llvm/lib \
+    HIP_CLANG_PATH=/opt/rocm/llvm/bin \
     ROCBLAS_USE_HIPBLASLT=1 \
     HIP_FORCE_DEV_KERNARG=1 \
     RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1 \
