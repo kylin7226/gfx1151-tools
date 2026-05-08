@@ -116,8 +116,8 @@ def patch_vllm(vllm_root=None, dry_run=False):
         # Force arch detection
         if 'def _get_gcn_arch() -> str:\n    return "gfx1151"' not in txt:
             txt = txt.replace('def _get_gcn_arch() -> str:', 'def _get_gcn_arch() -> str:\n    return "gfx1151"\n\ndef _old_get_gcn_arch() -> str:')
-            txt = re.sub(r'device_type = .*', 'device_type = "rocm"', txt)
-            txt = re.sub(r'device_name = .*', 'device_name = "gfx1151"', txt)
+            txt = re.sub(r'device_type:?\s*(str)?\s*=\s*.*', 'device_type = "rocm"', txt)
+            txt = re.sub(r'device_name:?\s*(str)?\s*=\s*.*', 'device_name = "gfx1151"', txt)
         p_rocm_plat.write_text(txt)
         print(" -> Patched vllm/platforms/rocm.py (MagicMock amdsmi + forced gfx1151)")
 
@@ -316,6 +316,9 @@ if _os.path.isdir(_jit_cache) and _jit_cache not in __path__:
                 txt = txt.replace("cap.minor) < (11, 0)", "cap.minor) < (12, 0)")
             if "capability() < (11, 0)" in txt:
                 txt = txt.replace("capability() < (11, 0)", "capability() < (12, 0)")
+            # v0.20.1 uses `device_capability < (11, 0)` variable check
+            if "device_capability is not None\n        and (9, 0) <= device_capability < (11, 0)" in txt:
+                txt = txt.replace("device_capability < (11, 0)", "device_capability < (12, 0)")
             p_triton.write_text(txt)
             print(f" -> Patched {p_triton} (Triton MoE on gfx11xx)")
 
@@ -616,7 +619,7 @@ except Exception:
             '                logger.debug("Profile cache write failed (non-fatal)")\n\n'
             '        unrequested_memory = self.init_snapshot.free_memory - self.requested_memory\n'
         )
-        if "Strix Halo Patch 16" not in txt and write_anchor in txt:
+        if "write_cached_kv_cache_memory_bytes" not in txt and write_anchor in txt:
             txt = txt.replace(write_anchor, write_replacement, 1)
             print(" -> Patched vllm/v1/worker/gpu_worker.py (16b: cache write after profiling)")
 
@@ -771,6 +774,7 @@ except Exception:
 
         # Inject gfx1151 softmax segments override in TritonAttentionMetadataBuilder.
         # Look for the default assignment in __init__ and add a conditional override.
+        # In v0.20.0+ the literal 16 was replaced by NUM_PAR_SOFTMAX_SEGMENTS constant.
         old_default = "self.num_par_softmax_segments = 16"
         new_override = (
             "self.num_par_softmax_segments = 16\n"
@@ -780,6 +784,18 @@ except Exception:
         )
         if "Strix Halo (gfx1151): 32 segments" not in txt and old_default in txt:
             txt = txt.replace(old_default, new_override, 1)
+            applied = True
+
+        # Fallback: match the constant form NUM_PAR_SOFTMAX_SEGMENTS (value = 16).
+        old_constant = "self.num_par_softmax_segments = NUM_PAR_SOFTMAX_SEGMENTS"
+        new_constant_override = (
+            "self.num_par_softmax_segments = NUM_PAR_SOFTMAX_SEGMENTS\n"
+            "        # Strix Halo (gfx1151): 32 segments shows gains for MQA or large heads.\n"
+            "        if on_gfx1x() and self.mq_head_size >= 224:\n"
+            "            self.num_par_softmax_segments = 32\n"
+        )
+        if not applied and "Strix Halo (gfx1151): 32 segments" not in txt and old_constant in txt:
+            txt = txt.replace(old_constant, new_constant_override, 1)
             applied = True
 
         if applied:

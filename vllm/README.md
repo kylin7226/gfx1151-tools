@@ -97,7 +97,7 @@ vllm/
 │   ├── LLM.md             ← 文本大模型详细部署指南
 │   └── ASR.md             ← 语音识别详细部署指南
 ├── scripts/
-│   ├── patch_strix.py     ← gfx1151 适配补丁 (19 个)
+│   ├── patch_strix.py     ← gfx1151 适配补丁 (19 个，详见 docs/PATCHES.md)
 │   ├── vllm_profile_cache.py ← profile 缓存优化
 │   └── dump_logs.sh       ← 日志诊断导出
 └── test/
@@ -119,6 +119,21 @@ vllm/
 | 量化 | AWQ-INT4 W4A16 g32 (compressed-tensors) | — |
 | 注意力 | Triton SDPA (JIT 运行时编译) | — |
 
+## 补丁
+
+对 vLLM v0.20.1 应用了 19 个补丁（22 个操作），全部在 v0.20.1 上验证通过。分为 6 类：
+
+| 分类 | 补丁 | 预期效果 |
+|------|------|---------|
+| 硬件使能 | 1-3 | amdsmi 禁用、on_gfx1x() 注入、强制 gfx1151 检测 |
+| AITER 兼容 | 4-9 | 禁用 CDNA 专属特性（FP8/RMSNorm/MoE），修复 JIT 路径 |
+| ROCm 修复 | 10-12 | Triton MoE 能力上限、APU VRAM 余量、hipCtx 警告 |
+| API 修复 | 13, 17b | /v1/responses 的 chat_template_kwargs + enable_thinking |
+| 特性 | 14, 17 | AWQ MMQ HIP 核、combine_hidden_states dtype 修复 |
+| 性能优化 | 16, 18, 19 | profile 缓存（~7min→<10s）、softmax segments、LDS 上限 |
+
+详细分析（逐补丁前后对比、可移除性评估、上游 PR 状态）见 [docs/PATCHES.md](docs/PATCHES.md)。
+
 ## 已知限制
 
 - **AOTriton**：Ubuntu 26.04 自带 CMake 4.2，AOTriton 构建不兼容，改用 Triton JIT 运行时编译
@@ -132,4 +147,5 @@ vllm/
 - [docs/GUIDE.md](docs/GUIDE.md) — 从零开始的全流程使用指南
 - [docs/LLM.md](docs/LLM.md) — Qwen3.6-27B 文本大模型详细部署指南
 - [docs/ASR.md](docs/ASR.md) — Qwen3-ASR 语音识别详细部署指南
+- [docs/PATCHES.md](docs/PATCHES.md) — 19 个补丁逐条分析与可移除性评估
 - [../README.md](../README.md) — 项目集总览（硬件、系统配置、Podman 部署）

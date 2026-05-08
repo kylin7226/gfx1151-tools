@@ -15,7 +15,7 @@ on:
       vllm_omni_commit:
         description: "vllm-omni git ref"
         type: string
-        default: "v0.20.0rc1"
+        default: "v0.20.0"
 
 env:
   REGISTRY: ghcr.io
@@ -132,7 +132,7 @@ jobs:
       - name: Compute image tags
         id: tags
         run: |
-          OMNI_VER="${{ github.event.inputs.vllm_omni_commit || 'v0.20.0rc1' }}"
+          OMNI_VER="${{ github.event.inputs.vllm_omni_commit || 'v0.20.0' }}"
           VLLM_VER="${{ github.event.inputs.vllm_commit || 'v0.20.1' }}"
           DT=$(date +%Y%m%d%H%M%S)
 
@@ -169,10 +169,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
-            org.opencontainers.image.description=vllm-omni ${{ github.event.inputs.vllm_omni_commit || 'v0.20.0rc1' }} for AMD gfx1151 (Strix Halo) with ROCm 7.13 nightly
+            org.opencontainers.image.description=vllm-omni ${{ github.event.inputs.vllm_omni_commit || 'v0.20.0' }} for AMD gfx1151 (Strix Halo) with ROCm 7.13 nightly
           build-args: |
             BASE_IMAGE=${{ steps.base.outputs.image }}
-            VLLM_OMNI_COMMIT=${{ github.event.inputs.vllm_omni_commit || 'v0.20.0rc1' }}
+            VLLM_OMNI_COMMIT=${{ github.event.inputs.vllm_omni_commit || 'v0.20.0' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
@@ -189,7 +189,7 @@ jobs:
           OMNI_TAG="${{ needs.build-vllm-omni.outputs.datetime_tag }}"
           echo "### Images published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Builds vLLM v0.20.1 + vllm-omni v0.20.0rc1 from source with ROCm 7.13 nightly + gfx1151 patches." >> $GITHUB_STEP_SUMMARY
+          echo "Builds vLLM v0.20.1 + vllm-omni v0.20.0 from source with ROCm 7.13 nightly + gfx1151 patches." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "#### vLLM (text LLM + ASR)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY

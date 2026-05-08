@@ -88,7 +88,7 @@ Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/
 | 容器运行时 | Podman | — |
 | ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
 | 深度学习框架 | PyTorch 2.10 + Triton 3.6 | ROCm nightly |
-| 推理引擎 | vLLM 0.20.1 / vLLM-Omni 0.20.0rc1 | 源码 + 补丁 |
+| 推理引擎 | vLLM 0.20.1 / vLLM-Omni 0.20.0 | 源码 + 19 个补丁（详见 [vllm/docs/PATCHES.md](vllm/docs/PATCHES.md)） |
 | 注意力 | Triton AMD SDPA (JIT 运行时编译) | — |
 | 量化 | AWQ-INT4 W4A16 g32（compressed-tensors） | — |
 
@@ -126,7 +126,7 @@ Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/
 | 镜像 | GHCR 地址 | 说明 |
 |------|-----------|------|
 | vLLM | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm_v0.20.1:<日期时间>` | 主标签 + `<分支名>` |
-| vLLM-Omni | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm-omni_v0.20.0rc1:<日期时间>` | 主标签 + `<分支名>` |
+| vLLM-Omni | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm-omni_v0.20.0:<日期时间>` | 主标签 + `<分支名>` |
 
 日期时间格式为 `YYYYMMDDHHmmSS`，例如 `20260502163025`。
 
@@ -150,7 +150,7 @@ gfx1151（RDNA 3.5）在 vLLM 生态中仍属"非官方支持"架构。本项目
 | [ROCm/vllm gfx11](https://github.com/ROCm/vllm/tree/gfx11) | AMD ROCm 官方分支 | 主干（跟踪上游） | 自定义 HIP 内核、AWQ MoE、gfx1151 CI |
 | [kyuz0/amd-strix-halo-vllm-toolboxes](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes) | Fedora Toolbx 容器 | HEAD + 补丁 | 多节点 RDMA 集群、bitsandbytes、TUI 向导 |
 | [hec-ovi/vllm-awq4-qwen](https://github.com/hec-ovi/vllm-awq4-qwen) | AWQ-INT4 + DFlash | v0.20.0 + 补丁 | DFlash 推测解码、AWQ MMQ HIP 预填充核 |
-| **本项目（gfx1151-tools）** | Ubuntu 生产部署 | **v0.20.1 + 补丁** | 多服务编排（LLM+ASR+Omni）、pip ROCm SDK |
+| **本项目（gfx1151-tools）** | Ubuntu 生产部署 | **v0.20.1 + 19 个补丁** | 多服务编排（LLM+ASR+Omni）、pip ROCm SDK |
 
 ### 1. 上游 vLLM（vllm-project/vllm）
 

@@ -6,7 +6,7 @@
 
 vLLM-Omni 是 vLLM 的扩展，增加了 any-to-any 多模态能力。它基于上游 vLLM v0.20.0 构建，在其之上添加了扩散引擎、阶段管道（stage pipeline）和 OmniConnector。
 
-本项目在 vLLM-Omni v0.20.0rc1 上添加了 gfx1151 适配补丁，使其能在 RDNA 3.5 消费级核显上运行。
+本项目在 vLLM-Omni v0.20.0 上添加了 gfx1151 适配补丁，使其能在 RDNA 3.5 消费级核显上运行。
 
 ## 模型
 
@@ -58,7 +58,7 @@ curl http://127.0.0.1:8002/v1/models
 | `VLLM_OMNI_GPU_MEMORY_UTIL` | `0.9` | GPU 显存利用率 |
 | `VLLM_OMNI_MAX_MODEL_LEN` | `8192` | 最大上下文长度 |
 | `VLLM_OMNI_MAX_NUM_SEQS` | `1` | 最大并发流数 |
-| `VLLM_OMNI_COMMIT` | `v0.20.0rc1` | vllm-omni 版本 |
+| `VLLM_OMNI_COMMIT` | `v0.20.0` | vllm-omni 版本 |
 
 > **注意**：`VLLM_OMNI_COMMIT` 变更后需要重新构建镜像。
 
@@ -84,20 +84,20 @@ curl http://127.0.0.1:8002/v1/models
 
 ```
 rocm_gfx1151_vllm:v0.20.1 (vLLM v0.20.1 + PyTorch + pip ROCm SDK)
-    └── rocm_gfx1151_vllm-omni:v0.20.0rc1 (+ vllm-omni v0.20.0rc1 + gfx1151 patches)
+    └── rocm_gfx1151_vllm-omni:v0.20.0 (+ vllm-omni v0.20.0 + gfx1151 patches)
 ```
 
 ## gfx1151 适配补丁
 
-vllm-omni 上游面向 CDNA 数据中心 GPU（MI300/MI325，gfx94x/gfx95x）。以下补丁使其在 RDNA 3.5 消费卡上可用：
+vllm-omni 上游面向 CDNA 数据中心 GPU（MI300/MI325，gfx94x/gfx95x）。vllm-omni 基于已打补丁的 builder 镜像（`rocm_gfx1151_vllm:v0.20.1`）构建，vLLM 级别的 19 个补丁全部自动继承。
 
-| 补丁 | 文件 | 内容 |
-|------|------|------|
-| Patch 1 | `vllm_omni/platforms/rocm/platform.py` | `get_diffusion_attn_backend_cls()` 中添加 gfx11xx 分支，返回 `TRITON_ATTN`（上游只允许 90 < capability < 100 的 aiter） |
-| Patch 1b | `vllm_omni/platforms/rocm/platform.py` | 添加 `_is_gfx11xx()` 辅助函数，检测 110 <= capability < 120 |
-| Patch 2 | 安装时检查 | 确认 onnxruntime-rocm 已正确安装（无 vanilla onnxruntime 冲突） |
+扩散注意力子系统（`vllm_omni/diffusion/attention/`）是 vllm-omni 的独立实现，不暴露 `TRITON_ATTN` 后端（仅 `FLASH_ATTN` / `TORCH_SDPA` / `SAGE_ATTN`）。gfx1151 上扩散阶段 fallback 到 `TORCH_SDPA`，无需额外补丁。
 
-补丁在 Docker 构建过程中通过 `scripts/patch_omni.py` 自动应用。
+`scripts/patch_omni.py` 仅在构建时做运行时验证检查：
+
+| 补丁 | 内容 |
+|------|------|
+| Patch 2 | 确认 onnxruntime-rocm 已正确安装（无 vanilla onnxruntime 冲突） |
 
 ### 为什么不用 AITER？
 
@@ -107,7 +107,7 @@ AITER 使用了 CDNA 专属指令（DPP 数据并行原语、`v_pk_mul_f32`/`v_c
 
 | 组件 | 后端 | 原因 |
 |------|------|------|
-| 扩散注意力 | `TRITON_ATTN` | 通过 Patch 1 启用，Triton AMD FlashAttention 是 RDNA 3.5 上唯一可行的 FA 路径 |
+| 扩散注意力 | `TORCH_SDPA` | 无 TRITON_ATTN 后端，fallback 到 PyTorch SDPA |
 | 视觉编码器 | `TRITON_ATTN` | vllm-omni 默认行为，与 vLLM 一致 |
 
 ## API 端点
@@ -124,7 +124,7 @@ AITER 使用了 CDNA 专属指令（DPP 数据并行原语、`v_pk_mul_f32`/`v_c
 
 | 维度 | vLLM 子项目 | vLLM-Omni 子项目 |
 |------|-------------|-------------------|
-| 基础 | vLLM v0.20.1 | vllm-omni v0.20.0rc1 (基于 vLLM v0.20.0) |
+| 基础 | vLLM v0.20.1 | vllm-omni v0.20.0 (基于 vLLM v0.20.0) |
 | 端口 | 8000 (LLM) + 8001 (ASR) | 8002 |
 | 模型 | Qwen3.6-27B-AWQ4 | Qwen3-Omni-MoE-27B |
 | 模态 | 文本 + 视觉（输入） | 文本/图像/视频/音频（输入/输出） |
@@ -146,7 +146,7 @@ vllm-omni/
 
 | 层 | 组件 | 版本 |
 |---|------|------|
-| 推理引擎 | vLLM-Omni | v0.20.0rc1 |
+| 推理引擎 | vLLM-Omni | v0.20.0 |
 | 基础 vLLM | vLLM | v0.20.1 |
 | ROCm SDK | TheRock 7.13 nightly tarball | /opt/rocm |
 | PyTorch | torch + triton | 2.10 + 3.6 |
@@ -166,3 +166,4 @@ vllm-omni/
 - [../README.md](../README.md) — 项目集总览（硬件、系统配置、Podman 部署）
 - [../vllm/README.md](../vllm/README.md) — vLLM 文本大模型子项目
 - [../vllm/docs/GUIDE.md](../vllm/docs/GUIDE.md) — 全流程使用指南
+- [../vllm/docs/PATCHES.md](../vllm/docs/PATCHES.md) — 19 个 vLLM 补丁逐条分析

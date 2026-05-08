@@ -241,18 +241,24 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 ## 十、补丁说明
 
-项目对 vLLM v0.20.1 应用了 19 个补丁：
+项目对 vLLM v0.20.1 应用了 19 个补丁（22 个操作），全部验证通过。详细逐条分析见 [PATCHES.md](PATCHES.md)。
 
-| 补丁 | 来源 | 内容 |
-|---|---|---|
-| 1-12 | kyuz0 (amd-strix-halo-vllm-toolboxes) | gfx1151 硬件使能（amdsmi 禁用、架构检测、CDNA-only 特性保护、JIT 路径修复、APU VRAM 余量等） |
-| 13 | 本地 | 将 `chat_template_kwargs` 传入 `/v1/responses` 流式路径 |
-| 14 | hec-ovi/vllm-awq4-qwen | AWQ-INT4 MMQ HIP 自定义核注册 |
-| 15 | hec-ovi/vllm-awq4-qwen | 移除 atomicAdd half/half2 polyfills（ROCm 7.13 兼容性） |
-| 16 | 本地 | 缓存 profile_run 结果，跳过 ~7 分钟内存分析 |
-| 17 | 本地 + PR #40334 | `combine_hidden_states` dtype 修复 + 非流式 `/v1/responses` enable_thinking 修复 |
-| 18 | ROCm/vllm gfx11 | Strix Halo softmax segments 调优（16→32） |
-| 19 | ROCm/vllm gfx11 | Triton SDPA 共享内存（LDS）溢出保护（BLOCK_M/TILE_SIZE 动态裁剪） |
+| 补丁 | 分类 | 内容 | 效果 |
+|---|---|---|---|
+| 1-3 | 硬件使能 | amdsmi 禁用、on_gfx1x() 注入、强制 gfx1151 检测 | 启动必需 |
+| 4-9 | AITER 兼容 | 禁用 CDNA 特性、修复 JIT 路径、软导入 | 避免崩溃 |
+| 10-12 | ROCm 修复 | Triton MoE 上限、APU VRAM 余量、hipCtx 警告 | SDK Bug 修复 |
+| 13, 17b | API 修复 | /v1/responses chat_template_kwargs + enable_thinking | API 正确性 |
+| 14, 17 | 特性 | AWQ MMQ HIP 核、combine_hidden_states dtype | 功能完整 |
+| 16, 18, 19 | 性能优化 | profile 缓存、softmax segments、LDS 上限 | 重启加速 + 注意力调优 |
+
+来源分布：
+- kyuz0/amd-strix-halo-vllm-toolboxes：Patch 1-12
+- hec-ovi/vllm-awq4-qwen：Patch 14-15
+- ROCm/vllm gfx11 分支：Patch 18-19
+- 本地开发：Patch 13, 16, 17
+
+上游候选：Patch 13（/v1/responses 通用 Bug）、Patch 17（PR #40334 OPEN）
 
 ## 十一、运行基准测试
 

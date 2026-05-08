@@ -1,6 +1,6 @@
 # vLLM-Omni layer on top of the rocm_gfx1151_vllm builder image.
 #
-# Installs vllm-omni v0.20.0rc1 (rebased on upstream vLLM v0.20.0) and
+# Installs vllm-omni v0.20.0 (rebased on upstream vLLM v0.20.0) and
 # applies gfx1151-specific patches to the vllm_omni package so that
 # attention backends and ROCm platform detection work correctly on AMD
 # Strix Halo (RDNA 3.5 / gfx1151).
@@ -19,10 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       espeak-ng ffmpeg jq \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install vllm-omni v0.20.0rc1 from source.
+# 2. Install vllm-omni v0.20.0 from source.
 # setup.py auto-detects ROCm via torch.version.hip and installs
 # onnxruntime-rocm (auto-uninstalling vanilla onnxruntime first).
-ARG VLLM_OMNI_COMMIT=v0.20.0rc1
+ARG VLLM_OMNI_COMMIT=v0.20.0
 RUN git clone --depth 1 --branch "${VLLM_OMNI_COMMIT}" \
       https://github.com/vllm-project/vllm-omni.git /opt/vllm-omni
 
