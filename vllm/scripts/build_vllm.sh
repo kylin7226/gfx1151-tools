@@ -1,18 +1,12 @@
 #!/bin/bash
 # vLLM build wrapper — captures full output on failure so CI logs show
 # the actual cmake/python error instead of a truncated tail.
-#
-# Strategy on failure:
-#   1. Print a compact ERROR SUMMARY (key lines only) — always visible
-#   2. Print FULL log (only if < 500 lines to avoid truncation)
-#   3. Print LAST 200 lines of log (always, guaranteed to survive truncation)
 set -euo pipefail
 
 LOG=/tmp/vllm_build.log
 
-export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit)
-echo "=== Env ==="
-echo "HIP_DEVICE_LIB_PATH=$HIP_DEVICE_LIB_PATH"
+echo "=== Build Environment ==="
+echo "HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit)"
 echo "VLLM_TARGET_DEVICE=${VLLM_TARGET_DEVICE:-<unset>}"
 echo "HIP_ARCHITECTURES=${HIP_ARCHITECTURES:-<unset>}"
 echo "GPU_TARGETS=${GPU_TARGETS:-<unset>}"
@@ -23,8 +17,17 @@ echo "CC=${CC:-<unset>}"
 echo "CXX=${CXX:-<unset>}"
 cmake --version 2>/dev/null | head -1
 python --version 2>/dev/null
-echo "=== Disk ==="
-df -h /tmp
+echo "ROCM_PATH=${ROCM_PATH:-<unset>}"
+echo "Disk:" && df -h /tmp | tail -1
+
+# Quick smoke test: verify cmake can detect HIP compiler
+echo "=== HIP compiler check ==="
+cmake --system-information 2>/dev/null | grep -i "HIP_COMPILER\|HIP_COMPILER_ID" | head -5 || true
+if [ -x "${CXX:-}" ]; then
+    echo "CXX compiler: $(${CXX} --version 2>/dev/null | head -1)"
+else
+    echo "WARNING: CXX compiler not found at ${CXX:-<unset>}"
+fi
 
 # Clean any stale build artifacts
 rm -rf /opt/vllm/build /opt/vllm/.deps
@@ -44,8 +47,7 @@ uv pip install --no-build-isolation --no-deps . >"$LOG" 2>&1 || {
 
     # --- ERROR SUMMARY: grep for the actual failure ---
     echo "--- error summary ---"
-    # Look for cmake-level errors
-    grep -inE "CMake Error|FATAL ERROR|fatal error|: error:|Error :" "$LOG" | tail -20 || true
+    grep -inE "CMake Error|FATAL ERROR|fatal error|: error:|Error :|cmake: error" "$LOG" | tail -20 || true
     echo "--- end error summary ---"
     echo ""
 
