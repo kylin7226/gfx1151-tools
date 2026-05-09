@@ -121,7 +121,7 @@ RUN python /opt/vllm/patch_strix.py
 # finds it via a plain `import vllm_profile_cache`.
 COPY scripts/vllm_profile_cache.py /opt/venv/lib/python3.12/site-packages/vllm_profile_cache.py
 
-# 7d. AWQ-INT4 MMQ HIP kernel source — Patch 16 registers this at runtime.
+# 7d. AWQ-INT4 MMQ HIP kernel source — Patch 14 registers this at runtime.
 COPY csrc/awq_mmq_gfx1151 /root/csrc/awq_mmq_gfx1151/
 WORKDIR /root/csrc/awq_mmq_gfx1151
 ENV ROCM_HOME=/opt/rocm \
@@ -198,12 +198,16 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:/opt/rocm/llvm/lib \
     HIP_FORCE_DEV_KERNARG=1 \
     RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES=1 \
     HSA_OVERRIDE_GFX_VERSION=11.5.1 \
+    HIP_VISIBLE_DEVICES=0 \
     HSA_NO_SCRATCH_RECLAIM=1 \
     MIOPEN_FIND_MODE=FAST \
     MIOPEN_DEBUG_CONV_DIRECT=0 \
     MIOPEN_DEBUG_CONV_GEMM=0 \
     FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
     SAFETENSORS_FAST_GPU=1 \
+    HF_HOME=/models \
+    HF_HUB_OFFLINE=1 \
+    VLLM_OMNI_TARGET_DEVICE=rocm \
     VLLM_ROCM_USE_AITER=0 \
     VLLM_USE_TRITON_AWQ=1 \
     VLLM_DISABLE_COMPILE_CACHE=1 \

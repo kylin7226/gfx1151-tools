@@ -38,10 +38,6 @@ services:
       - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}/profile:/root/.cache/vllm-profile
     ipc: host
     shm_size: "16gb"
-    environment:
-      HF_HOME: /models
-      HF_HUB_OFFLINE: "1"
-      HIP_VISIBLE_DEVICES: "0"
     command:
       - vllm
       - serve
@@ -120,16 +116,14 @@ services:
       retries: 3
       start_period: 90s
     devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
     volumes:
       - ${VLLM_HOST_MODELS_DIR}:/models:ro
       - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}:/root/.cache/vllm
       - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}/profile:/root/.cache/vllm-profile
     ipc: host
     shm_size: "16gb"
-    environment:
-      HF_HOME: /models
-      HF_HUB_OFFLINE: "1"
-      HIP_VISIBLE_DEVICES: "0"
     command:
       - vllm
       - serve
@@ -183,13 +177,6 @@ services:
       - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}:/root/.cache/vllm
     ipc: host
     shm_size: "16gb"
-    environment:
-      HF_HOME: /models
-      HF_HUB_OFFLINE: "1"
-      HIP_VISIBLE_DEVICES: "0"
-      # vllm-omni ROCm platform detection.
-      VLLM_OMNI_TARGET_DEVICE: rocm
-      # NEVER set VLLM_LOGGING_LEVEL=DEBUG (see vllm service comments).
     command:
       - vllm-omni
       - serve
@@ -209,3 +196,57 @@ services:
       - "${VLLM_OMNI_GPU_MEMORY_UTIL:-0.9}"
       - --max-num-seqs
       - "${VLLM_OMNI_MAX_NUM_SEQS:-1}"
+
+  # vLLM-Omni TTS — Qwen3-TTS text-to-speech (same builder image, --omni flag).
+  # Runs on port 8003. Supports CustomVoice (preset), VoiceDesign (create voice),
+  # and Base (voice cloning) modes. API: /v1/audio/speech (OpenAI compatible).
+  vllm-tts:
+    image: rocm_gfx1151_vllm:v0.20.1
+    build:
+      context: ./vllm
+      args:
+        VLLM_COMMIT: ${VLLM_COMMIT:-v0.20.1}
+    container_name: vllm-tts
+    restart: "no"
+    stop_grace_period: 30s
+    privileged: true
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    ports:
+      - "${VLLM_TTS_HOST_PORT:-8003}:8000"
+    volumes:
+      - ${VLLM_HOST_MODELS_DIR}:/models:ro
+      - ${VLLM_HOST_TRITON_CACHE:-./.triton-cache}:/root/.triton/cache
+      - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}:/root/.cache/vllm
+      # Speaker samples directory for uploaded voices.
+      - ${VLLM_HOST_VLLM_CACHE:-./.vllm-cache}/speakers:/root/.cache/vllm-omni/speakers
+    ipc: host
+    shm_size: "16gb"
+    command:
+      - vllm
+      - serve
+      - ${VLLM_TTS_MODEL_ID:-Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice}
+      - --deploy-config
+      - vllm_omni/deploy/qwen3_tts.yaml
+      - --omni
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --trust-remote-code
+      # HIP Graph capture is a documented freeze class on gfx1151.
+      - --enforce-eager
+      # TTS doesn't need long context.
+      - --max-model-len
+      - "${VLLM_TTS_MAX_MODEL_LEN:-4096}"
+      - --gpu-memory-utilization
+      - "${VLLM_TTS_GPU_MEMORY_UTIL:-0.7}"
+      - --max-num-seqs
+      - "${VLLM_TTS_MAX_NUM_SEQS:-4}"

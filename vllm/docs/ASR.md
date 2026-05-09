@@ -5,23 +5,21 @@ Qwen3-ASR 是 Qwen 系列的纯语音识别模型（~8B 参数，17 种语言）
 ## 架构概览
 
 ```
-┌──────────────────────────────────────────────────┐
-│  docker-compose.yml                              │
-│                                                    │
-│  ┌──────────────────┐   ┌──────────────────┐     │
-│  │  vllm (8000)     │   │  vllm-asr (8001) │     │
-│  │  Qwen3.6-27B     │   │  Qwen3-ASR-8B    │     │
-│  │  文本 LLM        │   │  语音识别        │     │
-│  │  文本 LLM + vision │   │  3 种模式        │     │
-│  └──────────────────┘   └──────────────────┘     │
-│         │                      │                  │
-│         └──────────┬───────────┘                  │
-│                    │ 128 GB UMA                   │
-│             AMD Strix Halo (gfx1151)              │
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  docker-compose.yml                                              │
+│                                                                    │
+│  ┌────────────────┐ ┌────────────────┐ ┌───────────────┐         │
+│  │ vllm (8000)    │ │ vllm-asr (8001)│ │ vllm-tts(8003)│         │
+│  │ Qwen3.6-27B    │ │ Qwen3-ASR-8B   │ │ Qwen3-TTS-1.7B│         │
+│  │ 文本 LLM       │ │ 语音识别       │ │ 语音合成      │         │
+│  └────────────────┘ └────────────────┘ └───────────────┘         │
+│          └─────────────┬───────────────┬──────────────┘          │
+│                    │ 128 GB UMA                                 │
+│             AMD Strix Halo (gfx1151)                            │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-两个服务共享同一 Docker 镜像（`rocm_gfx1151_vllm:v0.20.1`），但使用不同的模型和端口，各自独立进程。vLLM 不支持单实例同时加载文本 LLM 和 ASR 模型。
+四个服务共享同一 Docker 镜像（`rocm_gfx1151_vllm:v0.20.1`），但使用不同的模型和端口，各自独立进程。vLLM 不支持单实例同时加载文本 LLM 和 ASR 模型。
 
 ### 三种调用模式
 
@@ -98,7 +96,7 @@ docker compose build
 | 1-2 | 系统依赖 + pip ROCm SDK 7.13 nightly | ~5 min |
 | 3-4 | Python venv + PyTorch/torchaudio/triton | ~5 min |
 | 5-6 | 构建工具 + Conch Triton kernels | ~3 min |
-| 7 | 克隆 vLLM v0.20.1 + 应用 19 个补丁 | ~2 min |
+| 7 | 克隆 vLLM v0.20.1 + 应用 20 个补丁 | ~2 min |
 | 7d | 编译 AWQ-INT4 MMQ HIP 核 | ~1 min |
 | 8 | 编译 vLLM（MAX_JOBS=8） | ~10-15 min |
 | 8b | 安装运行时依赖 | ~2 min |
@@ -313,7 +311,7 @@ print('Model loaded successfully')
 | KV cache | ~24 GiB | ~2 GiB | ~26 GiB |
 | GTT 总计 | ~50 GiB | ~20 GiB | ~70 GiB |
 
-128 GB UMA 池完全够用。如果还需要运行 RAG api 和 TTS 服务（CPU-only），建议将文本 LLM 的 `gpu_memory_utilization` 降到 0.5，详见 README 中的 multi-stream profile。
+128 GB UMA 池完全够用。如果还需要运行 vllm-omni 和 TTS 服务，建议将文本 LLM 的 `gpu_memory_utilization` 降到 0.5，详见 README 中的 multi-stream profile。
 
 ### 健康检查
 
@@ -344,7 +342,7 @@ docker compose start vllm-asr
 # 完整重启（重建镜像后）
 docker compose down
 docker compose build
-docker compose up -d vllm vllm-asr
+docker compose up -d vllm vllm-asr vllm-omni vllm-tts
 
 # 查看 ASR 日志中的关键信息
 docker logs vllm-asr 2>&1 | grep -E "Application startup|Available KV|Cached KV|ERROR"

@@ -41,6 +41,8 @@ curl http://127.0.0.1:8000/v1/models
 |------|------|------|------|
 | vllm | 8000 | Qwen3.6-27B-AWQ4 | 文本 LLM + 视觉 + 工具调用 |
 | vllm-asr | 8001 | Qwen3-ASR-8B | 语音转文字（非流式/SSE/WebSocket） |
+| vllm-omni | 8002 | Qwen3-Omni-MoE-27B | 全模态（文本/图像/视频/音频 → 文本/音频） |
+| vllm-tts | 8003 | Qwen3-TTS-1.7B | 文字转语音（OpenAI 兼容 API） |
 
 ## 性能
 
@@ -97,7 +99,7 @@ vllm/
 │   ├── LLM.md             ← 文本大模型详细部署指南
 │   └── ASR.md             ← 语音识别详细部署指南
 ├── scripts/
-│   ├── patch_strix.py     ← gfx1151 适配补丁 (19 个，详见 docs/PATCHES.md)
+│   ├── patch_strix.py     ← gfx1151 适配补丁 (20 个，详见 docs/PATCHES.md)
 │   ├── vllm_profile_cache.py ← profile 缓存优化
 │   └── dump_logs.sh       ← 日志诊断导出
 └── test/
@@ -107,7 +109,7 @@ vllm/
     └── verify_responses_streaming.py ← SSE 追踪验证
 ```
 
-> docker-compose.yml 在项目根目录，包含 vllm/vllm-asr/vllm-omni 三个服务。
+> docker-compose.yml 在项目根目录，包含 vllm/vllm-asr/vllm-omni/vllm-tts 四个服务。
 
 ## 技术栈
 
@@ -121,7 +123,7 @@ vllm/
 
 ## 补丁
 
-对 vLLM v0.20.1 应用了 19 个补丁（22 个操作），全部在 v0.20.1 上验证通过。分为 6 类：
+对 vLLM v0.20.1 应用了 20 个补丁（23 个操作），全部在 v0.20.1 上验证通过。分为 6 类：
 
 | 分类 | 补丁 | 预期效果 |
 |------|------|---------|
@@ -148,5 +150,5 @@ vllm/
 - [docs/RUN.md](docs/RUN.md) — 容器运行与模型启动速查（docker compose / podman run / GHCR）
 - [docs/LLM.md](docs/LLM.md) — Qwen3.6-27B 文本大模型详细部署指南
 - [docs/ASR.md](docs/ASR.md) — Qwen3-ASR 语音识别详细部署指南
-- [docs/PATCHES.md](docs/PATCHES.md) — 19 个补丁逐条分析与可移除性评估
+- [docs/PATCHES.md](docs/PATCHES.md) — 20 个补丁逐条分析与可移除性评估
 - [../README.md](../README.md) — 项目集总览（硬件、系统配置、Podman 部署）

@@ -1,6 +1,6 @@
 # 项目使用指南
 
-Qwen 3.6-27B AWQ-INT4 + Qwen3-ASR 语音识别，运行于 AMD Strix Halo (gfx1151)。
+Qwen 3.6-27B AWQ-INT4 + Qwen3-ASR 语音识别 + Qwen3-TTS 语音合成，运行于 AMD Strix Halo (gfx1151)。
 
 ## 快速导航
 
@@ -8,6 +8,7 @@ Qwen 3.6-27B AWQ-INT4 + Qwen3-ASR 语音识别，运行于 AMD Strix Halo (gfx11
 |---|---|
 | [LLM.md](LLM.md) | Qwen3.6-27B 文本大模型部署指南 |
 | [ASR.md](ASR.md) | Qwen3-ASR 语音识别部署指南 |
+| [TTS 文档](../vllm-omni/README.md#qwen3-tts-语音合成) | Qwen3-TTS 语音合成部署指南 |
 | 本文档 | 从零开始的全流程使用指南 |
 
 ## 一、环境准备
@@ -90,6 +91,11 @@ nano .env
 | `VLLM_ASR_HOST_PORT` | `8001` | ASR 服务端口 |
 | `VLLM_ASR_GPU_MEMORY_UTIL` | `0.9` | ASR 显存利用率 |
 | `VLLM_ASR_MAX_MODEL_LEN` | `8192` | ASR 最大上下文 |
+| `VLLM_TTS_MODEL_ID` | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | TTS 模型 |
+| `VLLM_TTS_HOST_PORT` | `8003` | TTS 服务端口 |
+| `VLLM_TTS_GPU_MEMORY_UTIL` | `0.7` | TTS 显存利用率 |
+| `VLLM_TTS_MAX_MODEL_LEN` | `4096` | TTS 最大上下文 |
+| `VLLM_TTS_MAX_NUM_SEQS` | `4` | TTS 最大并发数 |
 
 ## 四、下载模型
 
@@ -108,7 +114,14 @@ ASR 模型也是 gated model，需要先访问 https://huggingface.co/Qwen/Qwen3
 HF_HUB_ENABLE_HF_TRANSFER=1 hf download Qwen/Qwen3-ASR-8B --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
 ```
 
-> 两个模型可以并行下载。磁盘占用：LLM ~14 GB + ASR ~16 GB = ~30 GB。
+### 4.3 TTS 模型（可选）
+
+```bash
+HF_HUB_ENABLE_HF_TRANSFER=1 hf download Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
+  --cache-dir "$VLLM_HOST_MODELS_DIR/hub"
+```
+
+> 全部模型可以并行下载。磁盘占用：LLM ~14 GB + ASR ~16 GB + TTS ~4 GB = ~34 GB。
 
 ## 五、构建镜像
 
@@ -120,10 +133,10 @@ docker compose build
 
 ## 六、启动服务
 
-### 6.1 启动全部服务（LLM + ASR）
+### 6.1 启动全部服务（LLM + ASR + Omni + TTS）
 
 ```bash
-docker compose up -d vllm vllm-asr
+docker compose up -d vllm vllm-asr vllm-omni vllm-tts
 ```
 
 ### 6.2 仅启动文本 LLM
@@ -138,7 +151,13 @@ docker compose up -d vllm
 docker compose up -d vllm-asr
 ```
 
-### 6.4 查看日志
+### 6.4 仅启动 TTS
+
+```bash
+docker compose up -d vllm-tts
+```
+
+### 6.5 查看日志
 
 ```bash
 # 文本 LLM
@@ -146,11 +165,14 @@ docker logs -f rocm_gfx1151_vllm
 
 # ASR
 docker logs -f vllm-asr
+
+# TTS
+docker logs -f vllm-tts
 ```
 
 **等待 `Application startup complete` 信号**，表示服务就绪。
 
-### 6.5 验证
+### 6.6 验证
 
 ```bash
 # 文本 LLM
@@ -158,6 +180,9 @@ curl http://127.0.0.1:8000/v1/models
 
 # ASR
 curl http://127.0.0.1:8001/v1/models
+
+# TTS
+curl http://127.0.0.1:8003/v1/audio/voices
 ```
 
 ## 七、快速测试
@@ -196,6 +221,22 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
   -F "file=@long_audio.wav" -F "model=Qwen/Qwen3-ASR-8B" -F "stream=true"
 ```
 
+### 7.4 语音合成（TTS）
+
+```bash
+# 基础语音合成
+curl -X POST http://127.0.0.1:8003/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -d '{"input": "你好世界", "voice": "vivian", "language": "Chinese"}' \
+    --output output.wav
+
+# 带风格指令
+curl -X POST http://127.0.0.1:8003/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -d '{"input": "太棒了！", "voice": "vivian", "instructions": "用兴奋的语气说"}' \
+    --output excited.wav
+```
+
 ## 八、推荐配置方案
 
 ### 8.1 单用户最大上下文
@@ -222,13 +263,13 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 
 实测空闲显存 ~50 GiB，为 CPU 服务（RAG/TTS）留出 ~75 GiB UMA 空间。
 
-### 8.3 同时运行 LLM + ASR
+### 8.3 同时运行 LLM + ASR + TTS
 
-| 资源 | 文本 LLM | ASR | 总计 |
-|---|---|---|---|
-| 模型权重 | ~28 GiB | ~16 GiB | ~44 GiB |
-| KV cache | ~24 GiB | ~2 GiB | ~26 GiB |
-| GTT 总计 | ~50 GiB | ~20 GiB | ~70 GiB |
+| 资源 | 文本 LLM | ASR | TTS | 总计 |
+|---|---|---|---|---|
+| 模型权重 | ~28 GiB | ~16 GiB | ~4 GiB | ~48 GiB |
+| KV cache | ~24 GiB | ~2 GiB | — | ~26 GiB |
+| GTT 总计 | ~50 GiB | ~20 GiB | ~8 GiB | ~78 GiB |
 
 128 GB UMA 池完全够用。如果使用 3 代理配置，建议将 LLM 的 `gpu_memory_utilization` 降到 0.5。
 
@@ -238,10 +279,12 @@ curl http://127.0.0.1:8001/v1/audio/transcriptions \
 |---|---|---|
 | 文本 LLM | 8000 | `/v1/chat/completions`, `/v1/responses`, `/v1/completions` |
 | ASR | 8001 | `/v1/audio/transcriptions`, `/v1/realtime` (WebSocket) |
+| Omni | 8002 | `/v1/chat/completions`（多模态输入/输出） |
+| TTS | 8003 | `/v1/audio/speech`, `/v1/audio/voices`, `/v1/audio/speech/batch` |
 
 ## 十、补丁说明
 
-项目对 vLLM v0.20.1 应用了 19 个补丁（22 个操作），全部验证通过。详细逐条分析见 [PATCHES.md](PATCHES.md)。
+项目对 vLLM v0.20.1 应用了 20 个补丁（23 个操作），全部验证通过。详细逐条分析见 [PATCHES.md](PATCHES.md)。
 
 | 补丁 | 分类 | 内容 | 效果 |
 |---|---|---|---|
@@ -289,7 +332,7 @@ python3 test/bench.py
 
 ### 服务启动后端口被占用
 
-修改 `.env` 中的 `VLLM_HOST_PORT` 或 `VLLM_ASR_HOST_PORT` 为其他可用端口。
+修改 `.env` 中的 `VLLM_HOST_PORT`、`VLLM_ASR_HOST_PORT`、`VLLM_OMNI_HOST_PORT` 或 `VLLM_TTS_HOST_PORT` 为其他可用端口。
 
 ### 模型加载失败 "Access denied"
 
@@ -313,10 +356,13 @@ docker compose stop vllm
 # 仅停止 ASR
 docker compose stop vllm-asr
 
+# 仅停止 TTS
+docker compose stop vllm-tts
+
 # 完整重建（修改代码/补丁后）
 docker compose down
 docker compose build
-docker compose up -d vllm vllm-asr
+docker compose up -d vllm vllm-asr vllm-omni vllm-tts
 ```
 
 ## 十四、GPU 监控
@@ -361,4 +407,5 @@ docker logs rocm_gfx1151_vllm 2>&1 | grep -E "Application startup|Available KV|C
 
 - [docs/LLM.md](LLM.md) — Qwen3.6-27B 文本大模型详细部署指南
 - [docs/ASR.md](ASR.md) — Qwen3-ASR 语音识别详细部署指南
+- [../vllm-omni/README.md](../vllm-omni/README.md#qwen3-tts-语音合成) — Qwen3-TTS 语音合成详细部署指南
 - README.md — 项目概览、性能数据、vs 官方 vLLM 对比
