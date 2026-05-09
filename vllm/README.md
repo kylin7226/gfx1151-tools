@@ -114,7 +114,7 @@ vllm/
 | 层 | 组件 | 版本 |
 |---|------|------|
 | 推理引擎 | vLLM | v0.20.1 |
-| ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
+| ROCm SDK | TheRock 7.13 nightly tarball | /opt/rocm |
 | PyTorch | torch + triton | 2.10 + 3.6 |
 | 量化 | AWQ-INT4 W4A16 g32 (compressed-tensors) | — |
 | 注意力 | Triton SDPA (JIT 运行时编译) | — |
@@ -145,6 +145,7 @@ vllm/
 ## 相关文档
 
 - [docs/GUIDE.md](docs/GUIDE.md) — 从零开始的全流程使用指南
+- [docs/RUN.md](docs/RUN.md) — 容器运行与模型启动速查（docker compose / podman run / GHCR）
 - [docs/LLM.md](docs/LLM.md) — Qwen3.6-27B 文本大模型详细部署指南
 - [docs/ASR.md](docs/ASR.md) — Qwen3-ASR 语音识别详细部署指南
 - [docs/PATCHES.md](docs/PATCHES.md) — 19 个补丁逐条分析与可移除性评估

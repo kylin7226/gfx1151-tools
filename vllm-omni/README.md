@@ -4,9 +4,9 @@
 
 ## 概述
 
-vLLM-Omni 是 vLLM 的扩展，增加了 any-to-any 多模态能力。它基于上游 vLLM v0.20.0 构建，在其之上添加了扩散引擎、阶段管道（stage pipeline）和 OmniConnector。
+vLLM-Omni 是 vLLM 的扩展，增加了 any-to-any 多模态能力。它基于上游 vLLM v0.20.0rc1 构建，在其之上添加了扩散引擎、阶段管道（stage pipeline）和 OmniConnector。
 
-本项目在 vLLM-Omni v0.20.0 上添加了 gfx1151 适配补丁，使其能在 RDNA 3.5 消费级核显上运行。
+本项目在 vLLM-Omni v0.20.0rc1 上添加了 gfx1151 适配补丁，使其能在 RDNA 3.5 消费级核显上运行。
 
 ## 模型
 
@@ -58,7 +58,7 @@ curl http://127.0.0.1:8002/v1/models
 | `VLLM_OMNI_GPU_MEMORY_UTIL` | `0.9` | GPU 显存利用率 |
 | `VLLM_OMNI_MAX_MODEL_LEN` | `8192` | 最大上下文长度 |
 | `VLLM_OMNI_MAX_NUM_SEQS` | `1` | 最大并发流数 |
-| `VLLM_OMNI_COMMIT` | `v0.20.0` | vllm-omni 版本 |
+| `VLLM_OMNI_COMMIT` | `v0.20.0rc1` | vllm-omni 版本 |
 
 > **注意**：`VLLM_OMNI_COMMIT` 变更后需要重新构建镜像。
 
@@ -84,7 +84,7 @@ curl http://127.0.0.1:8002/v1/models
 
 ```
 rocm_gfx1151_vllm:v0.20.1 (vLLM v0.20.1 + PyTorch + pip ROCm SDK)
-    └── rocm_gfx1151_vllm-omni:v0.20.0 (+ vllm-omni v0.20.0 + gfx1151 patches)
+    └── rocm_gfx1151_vllm-omni:v0.20.0rc1 (+ vllm-omni v0.20.0rc1 + gfx1151 patches)
 ```
 
 ## gfx1151 适配补丁
@@ -124,7 +124,7 @@ AITER 使用了 CDNA 专属指令（DPP 数据并行原语、`v_pk_mul_f32`/`v_c
 
 | 维度 | vLLM 子项目 | vLLM-Omni 子项目 |
 |------|-------------|-------------------|
-| 基础 | vLLM v0.20.1 | vllm-omni v0.20.0 (基于 vLLM v0.20.0) |
+| 基础 | vLLM v0.20.1 | vllm-omni v0.20.0rc1 (基于 vLLM v0.20.0rc1) |
 | 端口 | 8000 (LLM) + 8001 (ASR) | 8002 |
 | 模型 | Qwen3.6-27B-AWQ4 | Qwen3-Omni-MoE-27B |
 | 模态 | 文本 + 视觉（输入） | 文本/图像/视频/音频（输入/输出） |
@@ -146,7 +146,7 @@ vllm-omni/
 
 | 层 | 组件 | 版本 |
 |---|------|------|
-| 推理引擎 | vLLM-Omni | v0.20.0 |
+| 推理引擎 | vLLM-Omni | v0.20.0rc1 |
 | 基础 vLLM | vLLM | v0.20.1 |
 | ROCm SDK | TheRock 7.13 nightly tarball | /opt/rocm |
 | PyTorch | torch + triton | 2.10 + 3.6 |

@@ -74,6 +74,8 @@ podman-compose up -d vllm-omni
 
 Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/kfd` + `/dev/dri:/dev/dri` 直接访问 GPU 设备节点。
 
+> 详细的容器运行命令（包括独立 `podman run`、docker compose、GHCR 预构建镜像拉取）见 [vllm/docs/RUN.md](vllm/docs/RUN.md)。
+
 ---
 
 ## 项目概览
@@ -86,9 +88,9 @@ Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/
 |---|---|---|
 | 操作系统 | Ubuntu 26.04 LTS | — |
 | 容器运行时 | Podman | — |
-| ROCm SDK | pip rocm[devel,libraries] 7.13 nightly | gfx1151 (site-packages) |
+| ROCm SDK | TheRock 7.13 nightly tarball | /opt/rocm |
 | 深度学习框架 | PyTorch 2.10 + Triton 3.6 | ROCm nightly |
-| 推理引擎 | vLLM 0.20.1 / vLLM-Omni 0.20.0 | 源码 + 19 个补丁（详见 [vllm/docs/PATCHES.md](vllm/docs/PATCHES.md)） |
+| 推理引擎 | vLLM 0.20.1 / vLLM-Omni 0.20.0rc1 | 源码 + 19 个补丁（详见 [vllm/docs/PATCHES.md](vllm/docs/PATCHES.md)） |
 | 注意力 | Triton AMD SDPA (JIT 运行时编译) | — |
 | 量化 | AWQ-INT4 W4A16 g32（compressed-tensors） | — |
 
@@ -110,7 +112,7 @@ Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/
 │   ├── docker-compose.yml ← vLLM 服务编排
 │   ├── .env.template      ← vLLM 环境变量模板
 │   ├── glados.py          ← CLI 客户端
-│   ├── docs/              ← vLLM 文档（LLM/ASR/使用指南）
+│   ├── docs/              ← vLLM 文档（LLM/ASR/使用指南/容器运行速查）
 │   ├── scripts/           ← vLLM 构建脚本和补丁 (patch_strix.py + vllm_profile_cache.py)
 │   └── test/              ← vLLM 测试和基准
 └── vllm-omni/
@@ -126,7 +128,7 @@ Podman 以 rootless 模式运行，容器通过 `--privileged` + `/dev/kfd:/dev/
 | 镜像 | GHCR 地址 | 说明 |
 |------|-----------|------|
 | vLLM | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm_v0.20.1:<日期时间>` | 主标签 + `<分支名>` |
-| vLLM-Omni | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm-omni_v0.20.0:<日期时间>` | 主标签 + `<分支名>` |
+| vLLM-Omni | `ghcr.io/<owner>/<repo>/rocm_gfx1151_vllm-omni_v0.20.0rc1:<日期时间>` | 主标签 + `<分支名>` |
 
 日期时间格式为 `YYYYMMDDHHmmSS`，例如 `20260502163025`。
 
@@ -150,7 +152,7 @@ gfx1151（RDNA 3.5）在 vLLM 生态中仍属"非官方支持"架构。本项目
 | [ROCm/vllm gfx11](https://github.com/ROCm/vllm/tree/gfx11) | AMD ROCm 官方分支 | 主干（跟踪上游） | 自定义 HIP 内核、AWQ MoE、gfx1151 CI |
 | [kyuz0/amd-strix-halo-vllm-toolboxes](https://github.com/kyuz0/amd-strix-halo-vllm-toolboxes) | Fedora Toolbx 容器 | HEAD + 补丁 | 多节点 RDMA 集群、bitsandbytes、TUI 向导 |
 | [hec-ovi/vllm-awq4-qwen](https://github.com/hec-ovi/vllm-awq4-qwen) | AWQ-INT4 + DFlash | v0.20.0 + 补丁 | DFlash 推测解码、AWQ MMQ HIP 预填充核 |
-| **本项目（gfx1151-tools）** | Ubuntu 生产部署 | **v0.20.1 + 19 个补丁** | 多服务编排（LLM+ASR+Omni）、pip ROCm SDK |
+| **本项目（gfx1151-tools）** | Ubuntu 生产部署 | **v0.20.1 + 19 个补丁** | 多服务编排（LLM+ASR+Omni）、TheRock ROCm SDK |
 
 ### 1. 上游 vLLM（vllm-project/vllm）
 
@@ -187,7 +189,7 @@ kyuz0（Donato Capitella）的 Fedora Toolbx 容器项目，是最早的 Strix H
 **与本项目差异**：
 | 维度 | kyuz0 toolboxes | 本项目 |
 |------|-----------------|--------|
-| OS | Fedora 43 + TheRock tarball | Ubuntu 26.04 + pip ROCm SDK |
+| OS | Fedora 43 + TheRock tarball | Ubuntu 26.04 + TheRock tarball |
 | 容器 | Toolbx（交互式桌面环境） | Podman（headless 服务） |
 | 量化 | BF16 + AWQ（bitsandbytes） | AWQ-INT4（compressed-tensors） |
 | 网络 | RDMA/RoCE 多节点集群 | 单节点 |
@@ -212,7 +214,7 @@ hec-ovi 的 AWQ-INT4 + DFlash 项目，是本项目最初的基础参考：
 | AWQ MMQ | INT8 WMMA 预填充核 | 已移除 |
 | 服务编排 | 单 vLLM 服务 | LLM + ASR + Omni 三服务 |
 | OS | Ubuntu 26.04 | Ubuntu 26.04 |
-| ROCm SDK | pip 7.13 nightly | pip 7.13 nightly |
+| ROCm SDK | pip 7.13 nightly | TheRock 7.13 nightly tarball |
 | 文档 | 英文 | 中文 |
 
 **DFlash 移除说明**：本项目移除了 DFlash 相关内容，原因包括：(1) DFlash 推测解码在 gfx1151 上仍属早期上游功能，5+ 个 bug 修复 PR 未合并；(2) 非流式工具调用和流式推理的稳定性问题；(3) DFlash 接受率在 N>8 时急剧下降，实际生产收益不稳定。
@@ -223,7 +225,7 @@ hec-ovi 的 AWQ-INT4 + DFlash 项目，是本项目最初的基础参考：
 
 - **面向生产部署**：headless Podman 服务、docker-compose 编排、GHCR 自动构建
 - **多服务共存**：LLM（8000）+ ASR（8001）+ Omni（8002）三服务独立运行，各自优化
-- **pip ROCm SDK**：采用 `uv pip install rocm[devel,libraries]` 替代 TheRock tarball，更轻量、更可复现
+- **TheRock ROCm SDK**：采用 TheRock tarball 替代 pip 安装包，更轻量、更可复现
 - **中文文档**：全流程中文文档，包含硬件配置、部署指南、故障排查
 - **AWQ-INT4 专注**：不做 DFlash 推测解码，专注 compressed-tensors AWQ-INT4 路径的稳定性和性能
 - **vLLM v0.20.1**：跟踪最新上游补丁版本，减少补丁数量
@@ -236,3 +238,15 @@ hec-ovi 的 AWQ-INT4 + DFlash 项目，是本项目最初的基础参考：
 - [kyuz0 的 Strix Halo vLLM 基准测试](https://kyuz0.github.io/amd-strix-halo-vllm-toolboxes/)
 - [hec-ovi/vllm-awq4-qwen](https://github.com/hec-ovi/vllm-awq4-qwen)
 - [vLLM Issue #16621 — Strix Halo 支持请求](https://github.com/vllm-project/vllm/issues/16621)
+
+### 相关文档
+
+| 文档 | 内容 |
+|------|------|
+| [vllm/docs/RUN.md](vllm/docs/RUN.md) | 容器运行与模型启动速查（docker compose / podman run / GHCR 镜像） |
+| [vllm/docs/GUIDE.md](vllm/docs/GUIDE.md) | 从零开始的全流程使用指南 |
+| [vllm/docs/LLM.md](vllm/docs/LLM.md) | Qwen3.6-27B 文本大模型详细部署指南 |
+| [vllm/docs/ASR.md](vllm/docs/ASR.md) | Qwen3-ASR 语音识别详细部署指南 |
+| [vllm/docs/PATCHES.md](vllm/docs/PATCHES.md) | 19 个补丁逐条分析与可移除性评估 |
+| [vllm/README.md](vllm/README.md) | vLLM 子项目概览 |
+| [vllm-omni/README.md](vllm-omni/README.md) | vLLM-Omni 子项目概览 |
