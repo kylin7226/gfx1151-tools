@@ -253,17 +253,123 @@ podman run -d \
     --max-num-seqs 1
 ```
 
-### 3.4 关键参数速查
+### 3.4 容器运行时参数
 
-| 参数 | 作用 | 何时调整 |
-|------|------|----------|
-| `--gpu-memory-utilization` | UMA 池利用率上限 | OOM 时降低（0.9→0.7→0.5） |
-| `--max-num-seqs` | 最大并发序列数 | 多用户并发时增大 |
-| `--max-model-len` | 最大上下文长度 | 需要超长上下文时增大，内存紧张时减小 |
-| `--enforce-eager` | 禁用 HIP 图捕获 | **gfx1151 上必须开启** |
-| `--attention-backend TRITON_ATTN` | Triton 注意力 | **gfx1151 上 LLM 必须** |
-| `--mm-encoder-attn-backend TRITON_ATTN` | 多模态编码器注意力 | **gfx1151 上必须**（TORCH_SDPA 会产生 NaN） |
-| `VLLM_SKIP_MEMORY_PROFILING=1` | 跳过 ~7 分钟 profile | 配合 `VLLM_PROFILE_CACHE_DIR` 加速重启 |
+这些是 `docker run` / `podman run` 的通用参数，三个服务共用。
+
+| 参数 | 说明 |
+|------|------|
+| `--name <name>` | 容器名称，用于 `docker logs`、`docker exec` 等命令引用 |
+| `--privileged` | 赋予容器几乎全部宿主机权限，使容器内能直接访问 GPU 设备节点 |
+| `--device /dev/kfd:/dev/kfd` | 映射 AMD GPU 的 KFD 设备节点（Kernel Fusion Driver），ROCm 运行时必需 |
+| `--device /dev/dri:/dev/dri` | 映射 DRI（Direct Rendering Infrastructure）设备节点，用于 DRM/GEM 内存管理 |
+| `--ipc host` | 共享宿主机 IPC 命名空间。vLLM 的多进程张量并行依赖共享内存通信，必须设置为 `host` |
+| `--shm-size 16gb` | 设置 `/dev/shm` 共享内存大小。PyTorch DataLoader 和 Triton JIT 编译使用共享内存，默认 64MB 不够 |
+| `-p <host>:<container>` | 端口映射。ASR 和 Omni 的容器内端口固定为 8000，通过映射到不同宿主机端口实现多服务共存 |
+| `-v <host>:<container>:ro` | 卷挂载。`:ro` 表示只读（模型目录），防止容器内误写模型文件 |
+
+### 3.5 环境变量详解
+
+#### 3.5.1 HuggingFace 相关
+
+| 变量 | 示例值 | 说明 |
+|------|--------|------|
+| `HF_HOME` | `/models` | HF 缓存根目录。容器内指向挂载的模型目录，避免重复下载 |
+| `HF_HUB_OFFLINE` | `1` | 离线模式。已预下载模型时设为 1，跳过网络检查加速启动 |
+| `HF_TOKEN` | `hf_xxx...` | HuggingFace 访问令牌。访问 gated model（ASR、Omni）时必须。通过 `.env` 或 `-e` 传入 |
+
+#### 3.5.2 ROCm/GPU 相关
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `HIP_VISIBLE_DEVICES` | `0` | 可见 GPU 设备索引。单 iGPU 设为 0；如需隐藏 GPU 设为空字符串 |
+| `HSA_OVERRIDE_GFX_VERSION` | `11.5.1` | 强制覆盖 GFX IP 版本。ASR 服务使用此变量确保 ROCm 识别 gfx1151。格式为 `major.minor.stepping` |
+| `HSA_NO_SCRATCH_RECLAIM` | `1` | 禁止 HSA 运行时回收 GPU scratch 内存。gfx1151 上 AWQ 张量加载时不设置会触发段错误（vllm#37151） |
+| `MIOPEN_FIND_MODE` | `FAST` | MIOpen 卷积算法搜索模式。设为 `FAST` 跳过穷举搜索，使用启发式选择。gfx1151 无预编译求解器数据库，默认 exhaustive 模式会在 ViT 卷积层卡住 |
+| `FLASH_ATTENTION_TRITON_AMD_ENABLE` | `TRUE` | 启用 Triton AMD FlashAttention 路径。gfx1151 上唯一可行的 FlashAttention 实现 |
+| `VLLM_ROCM_USE_AITER` | `0` | 禁用 AITER 自定义内核。AITER 使用 CDNA 专属指令（DPP、向量打包），在 RDNA 3.5 上不存在，启用即崩溃 |
+
+#### 3.5.3 vLLM 功能开关
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VLLM_USE_TRITON_AWQ` | `1` | 强制使用 Triton AWQ 内核路径。AWQ-INT4 模型通过 AWQMarlin → Conch 内核执行，比 legacy `ops.awq_gemm` 快 57-73% |
+| `VLLM_DISABLE_COMPILE_CACHE` | `1` | 禁用 TorchDynamo 编译缓存。gfx1151 上冷启动时 EngineCore 序列化有 bug，设为 1 避免 |
+| `VLLM_SKIP_MEMORY_PROFILING` | `1` | 跳过内存 profile_run。vLLM 默认启动时运行 ~7 分钟合成推理来确定 KV cache 大小。设为 1 配合 profile 缓存机制可将重启从 ~9 min 降到 ~90 s |
+| `VLLM_PROFILE_CACHE_DIR` | `/root/.cache/vllm-profile` | Profile 缓存写入/读取目录。首次启动后缓存 KV cache 大小结果，后续启动直接读取。需挂载持久化卷 |
+| `VLLM_MAX_AUDIO_CLIP_FILESIZE_MB` | `25` | ASR 专用。单个音频片段大小上限（MB）。25 MB 约等于 30 分钟 16kHz 单声道 PCM16 音频 |
+| `VLLM_OMNI_TARGET_DEVICE` | `rocm` | Omni 专用。强制 vllm-omni 使用 ROCm 平台检测而非 CUDA |
+
+### 3.6 vLLM serve 命令行参数
+
+这些是 `vllm serve` 命令的参数，通过 docker-compose.yml 的 `command:` 或独立 `podman run` 传入。
+
+#### 3.6.1 通用参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--host` | `0.0.0.0` | 服务监听地址。容器内必须为 `0.0.0.0` 以接受外部连接 |
+| `--port` | `8000` | 服务监听端口。容器内固定 8000，通过 `-p` 映射到宿主机不同端口 |
+| `--served-model-name` | 自动检测 | API 中展示的模型名称。`/v1/models` 和聊天请求中的 `model` 字段需匹配此值 |
+| `--enforce-eager` | 关闭 | 禁用 HIP Graph（CUDA Graph 的 ROCm 等效物）。gfx1151 上 HIP Graph 捕获会导致冻结，**必须开启** |
+| `--gpu-memory-utilization` | `0.9` | GPU 内存利用率上限。vLLM 用此值 × 总可用内存 = KV cache + 权重的预算上限。OOM 时降低（0.9→0.7→0.5） |
+| `--max-num-seqs` | `256` | 最大并发序列数。单用户设为 1；多用户并发时增大。增大后 KV cache 预算更紧张 |
+| `--max-model-len` | 模型默认 | 最大上下文长度（token 数）。Qwen 3.6 原生 256K。减小此值可直接降低 KV cache 内存占用 |
+
+#### 3.6.2 注意力后端参数
+
+| 参数 | 可选值 | 说明 |
+|------|--------|------|
+| `--attention-backend` | `TRITON_ATTN`（推荐）、`ROCM_ATTN`、`TORCH_SDPA` | LLM 主注意力后端。gfx1151 上 `TRITON_ATTN` 性能最优，`ROCM_ATTN` 的 paged attention kernel 内部回退到 Triton 有额外开销 |
+| `--mm-encoder-attn-backend` | `TRITON_ATTN`（必须）、`TORCH_SDPA` | 多模态编码器（视觉/音频）的注意力后端。**gfx1151 上必须为 `TRITON_ATTN`**，`TORCH_SDPA` 在 gfx1151 上会产生 NaN/Inf 导致视觉/音频输入返回乱码 |
+
+#### 3.6.3 模型专用参数
+
+| 参数 | 适用服务 | 说明 |
+|------|----------|------|
+| `--reasoning-parser qwen3` | LLM | 解析 Qwen3 的 `` 推理 token，使 `/v1/responses` 能分离 reasoning 和 output 内容 |
+| `--tool-call-parser qwen3_coder` | LLM | Qwen3.5/3.6 工具调用解析器。配合 `--enable-auto-tool-choice` 使用。**注意**：流式模式下有上游 bug（3 个 PR 未合并），建议工具调用使用非流式 |
+| `--enable-auto-tool-choice` | LLM | 自动检测并执行工具调用。需配合 `--tool-call-parser` |
+| `--supported-tasks transcription,realtime` | ASR | 注册 ASR 端点：`/v1/audio/transcriptions`（非流式/SSE 流式）和 `/v1/realtime`（WebSocket 实时） |
+
+### 3.7 .env 环境变量
+
+docker-compose.yml 通过 `${VAR:-default}` 语法从 `.env` 文件读取以下变量。
+
+| 变量 | 默认值 | 适用服务 | 说明 |
+|------|--------|----------|------|
+| `VLLM_HOST_MODELS_DIR` | — | 全部 | **必填**。宿主机上 HF 缓存的绝对路径。通过只读挂载到容器内 `/models` |
+| `HF_TOKEN` | — | 全部 | **必填**。HuggingFace 访问令牌 |
+| `VLLM_COMMIT` | `v0.20.1` | LLM, ASR | vLLM git 版本引用。修改后需重新构建镜像 |
+| `VLLM_MODEL_ID` | `cyankiwi/Qwen3.6-27B-AWQ-INT4` | LLM | 模型 ID 或本地路径 |
+| `VLLM_SERVED_MODEL_NAME` | `Qwen3.6-27B-AWQ4` | LLM | API 中展示的模型名 |
+| `VLLM_HOST_PORT` | `8000` | LLM | LLM 服务宿主机端口 |
+| `VLLM_MAX_NUM_SEQS` | `1` | LLM | LLM 最大并发序列数 |
+| `VLLM_MAX_MODEL_LEN` | `262144` | LLM | LLM 最大上下文长度 |
+| `VLLM_GPU_MEMORY_UTIL` | `0.9` | LLM | LLM GPU 内存利用率 |
+| `VLLM_ASR_MODEL_ID` | `Qwen/Qwen3-ASR-8B` | ASR | ASR 模型 ID |
+| `VLLM_ASR_HOST_PORT` | `8001` | ASR | ASR 服务宿主机端口 |
+| `VLLM_ASR_GPU_MEMORY_UTIL` | `0.9` | ASR | ASR GPU 内存利用率 |
+| `VLLM_ASR_MAX_MODEL_LEN` | `8192` | ASR | ASR 最大上下文长度 |
+| `VLLM_ASR_MAX_NUM_SEQS` | `1` | ASR | ASR 最大并发序列数 |
+| `VLLM_OMNI_MODEL_ID` | `Qwen/Qwen3-Omni-MoE-27B` | Omni | Omni 模型 ID |
+| `VLLM_OMNI_SERVED_MODEL_NAME` | `Qwen3-Omni-MoE-27B` | Omni | Omni API 中展示的模型名 |
+| `VLLM_OMNI_HOST_PORT` | `8002` | Omni | Omni 服务宿主机端口 |
+| `VLLM_OMNI_GPU_MEMORY_UTIL` | `0.9` | Omni | Omni GPU 内存利用率 |
+| `VLLM_OMNI_MAX_MODEL_LEN` | `8192` | Omni | Omni 最大上下文长度 |
+| `VLLM_OMNI_MAX_NUM_SEQS` | `1` | Omni | Omni 最大并发序列数 |
+| `VLLM_OMNI_COMMIT` | `v0.20.0rc1` | Omni | vllm-omni git 版本引用 |
+| `VLLM_HOST_TRITON_CACHE` | `./.triton-cache` | LLM, Omni | Triton JIT 缓存宿主机路径 |
+| `VLLM_HOST_VLLM_CACHE` | `./.vllm-cache` | 全部 | vLLM 缓存宿主机路径 |
+
+### 3.8 卷挂载详解
+
+| 宿主机路径 | 容器内路径 | 权限 | 用途 |
+|------------|-----------|------|------|
+| `$VLLM_HOST_MODELS_DIR` | `/models` | 只读 (`ro`) | HuggingFace 模型缓存。包含 `hub/` 子目录，内有各模型 snapshot |
+| `$VLLM_HOST_TRITON_CACHE` | `/root/.triton/cache` | 读写 | Triton JIT 编译缓存。持久化后重启容器无需重新编译内核 |
+| `$VLLM_HOST_VLLM_CACHE` | `/root/.cache/vllm` | 读写 | vLLM 内部缓存（如 torch compile cache，当 `VLLM_DISABLE_COMPILE_CACHE=0` 时） |
+| `$VLLM_HOST_VLLM_CACHE/profile` | `/root/.cache/vllm-profile` | 读写 | Profile 缓存。记录 KV cache 内存大小测量结果，加速后续启动 |
 
 ---
 
@@ -308,15 +414,15 @@ docker pull ghcr.io/<owner>/gfx1151-tools/rocm_gfx1151_vllm_v0.20.1:202605091234
 
 ### 5.2 常见问题
 
-| 症状 | 原因 | 解决 |
-|------|------|------|
-| 启动后 curl 无响应 | 仍在 profile_run 阶段 | 等待 `Application startup complete` 日志 |
-| OOM / 显存不足 | `--gpu-memory-utilization` 过高 | 降到 0.5-0.7，或减少 `--max-model-len` |
-| 端口被占用 | 其他服务已占用端口 | 修改 `-p` 映射或 `.env` 中的端口变量 |
-| 模型加载失败 "Access denied" | HF Token 无效或未接受 gated model 条款 | 检查 `HF_TOKEN`，登录 HF 接受条款后重新下载 |
-| 视觉输入返回乱码 | 使用了错误的注意力后端 | 确保 `--mm-encoder-attn-backend TRITON_ATTN` |
-| 工具调用流式不完整 | 上游流式解析器 bug | 使用非流式或 `/v1/responses` + `stream: true` |
-| DEBUG 日志导致极慢 | `VLLM_LOGGING_LEVEL=DEBUG` 使每个 op 格式化参数 | **不要设置 DEBUG 级别** |
+| 症状　　　　　　　　　　　　 | 原因　　　　　　　　　　　　　　　　　　　　　　| 解决　　　　　　　　　　　　　　　　　　　　　|
+| ------------------------------| -------------------------------------------------| -----------------------------------------------|
+| 启动后 curl 无响应　　　　　 | 仍在 profile_run 阶段　　　　　　　　　　　　　 | 等待 `Application startup complete` 日志　　　|
+| OOM / 显存不足　　　　　　　 | `--gpu-memory-utilization` 过高　　　　　　　　 | 降到 0.5-0.7，或减少 `--max-model-len`　　　　|
+| 端口被占用　　　　　　　　　 | 其他服务已占用端口　　　　　　　　　　　　　　　| 修改 `-p` 映射或 `.env` 中的端口变量　　　　　|
+| 模型加载失败 "Access denied" | HF Token 无效或未接受 gated model 条款　　　　　| 检查 `HF_TOKEN`，登录 HF 接受条款后重新下载　 |
+| 视觉输入返回乱码　　　　　　 | 使用了错误的注意力后端　　　　　　　　　　　　　| 确保 `--mm-encoder-attn-backend TRITON_ATTN`　|
+| 工具调用流式不完整　　　　　 | 上游流式解析器 bug　　　　　　　　　　　　　　　| 使用非流式或 `/v1/responses` + `stream: true` |
+| DEBUG 日志导致极慢　　　　　 | `VLLM_LOGGING_LEVEL=DEBUG` 使每个 op 格式化参数 | **不要设置 DEBUG 级别**　　　　　　　　　　　 |
 
 ### 5.3 诊断命令
 
