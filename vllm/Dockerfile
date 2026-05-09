@@ -158,9 +158,6 @@ ENV ROCM_HOME=/opt/rocm \
 
 RUN echo "=== Disk before vLLM build ===" && df -h . && \
     rm -rf /opt/rocm/share/doc /opt/rocm/share/amd_smi \
-           /opt/rocm/lib/rocprofiler* /opt/rocm/lib/roctracer \
-           /opt/rocm/lib/rocm-smi /opt/rocm/lib/rocminfo \
-           /opt/rocm/lib/hip*test* /opt/rocm/lib/*_test* \
            /root/.local/share/uv/cache && \
     echo "=== After cleanup ===" && df -h . && \
     /opt/vllm/build_vllm.sh && \
