@@ -46,9 +46,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake ninja-build \
       python3.12 python3.12-venv python3.12-dev \
       aria2 tar xz-utils \
-      libatomic1 libnuma-dev libgomp1 libelf1 \
+      libatomic1 libnuma-dev libgomp1 libelf1t64 \
       libdrm-dev zlib1g-dev libssl-dev \
-      libgoogle-perftools4 \
+      libgoogle-perftools4t64 \
       liblzma-dev \
       procps \
       pkg-config \
