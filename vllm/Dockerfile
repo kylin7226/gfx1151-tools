@@ -125,7 +125,9 @@ WORKDIR /root/csrc/awq_mmq_gfx1151
 ENV ROCM_HOME=/opt/rocm \
     ROCM_PATH=/opt/rocm \
     HIP_PATH=/opt/rocm
-RUN CC=/opt/rocm/llvm/bin/clang \
+RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
+    echo "HIP_DEVICE_LIB_PATH=${HIP_DEVICE_LIB_PATH}" && \
+    CC=/opt/rocm/llvm/bin/clang \
     CXX=/opt/rocm/llvm/bin/clang++ \
     python setup.py build_ext --inplace && \
     ls -la /root/csrc/awq_mmq_gfx1151/awq_mmq_gfx1151/*.so && \
