@@ -155,7 +155,7 @@ vllm-omni/
 
 ## 已知限制
 
-- **AOTriton**：Ubuntu 26.04 自带 CMake 4.2 与 AOTriton 构建系统不兼容，改用 Triton JIT 运行时编译
+- **AOTriton**：Ubuntu 24.04 自带 CMake 3.28 与 AOTriton 构建系统不兼容，改用 Triton JIT 运行时编译
 - **AITER**：CDNA 专属指令在 RDNA 上不存在，完全禁用
 - **HIP Graph**：gfx1151 上存在冻结类问题，使用 `--enforce-eager`
 - **Flash-Attention（Dao-AILab）**：gfx1151 上编译失败，使用 Triton SDPA

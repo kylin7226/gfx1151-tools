@@ -1,4 +1,4 @@
-# rocm_gfx1151_vllm source-build image — Ubuntu 26.04 + TheRock ROCm 7.13 nightly + vLLM from source.
+# rocm_gfx1151_vllm source-build image — Ubuntu 24.04 + TheRock ROCm 7.13 nightly + vLLM from source.
 #
 # Builds vLLM 0.20.1+ against TheRock ROCm 7.13 nightly for AMD Strix Halo
 # (gfx1151 / RDNA 3.5). Target model: cyankiwi/Qwen3.6-27B-AWQ-INT4
@@ -19,10 +19,9 @@
 #   - AITER custom build  : SKIPPED. Disabled at runtime via
 #                           VLLM_ROCM_USE_AITER=0; the patch bundle also
 #                           fences AITER FP8 / MoE / RMSNorm off on gfx1x.
-#   - AOTriton             : SKIPPED. Requires CMake 3.x (Ubuntu 26.04 ships
-#                           CMake 4.2 which breaks AOTriton's build system).
-#                           PyTorch 2.13 ROCm nightly uses Triton JIT-compiled
-#                           SDPA kernels at runtime instead.
+#   - AOTriton             : SKIPPED. Requires CMake 3.x (Ubuntu 24.04 ships
+#                           CMake 3.28 which works, but we use PyTorch's
+#                           Triton JIT-compiled SDPA kernels at runtime instead).
 #   - Flash-Attention      : SKIPPED. ROCm/flash-attention main_perf HEAD
 #                           is a 2.2-3.7x ViT regression on gfx1151
 #                           (Dao-AILab/flash-attention#2392). vLLM's
@@ -31,7 +30,7 @@
 #   - bitsandbytes ROCm    : SKIPPED. AWQ via compressed-tensors.
 #   - Custom RCCL          : SKIPPED. Single-iGPU, no NCCL.
 
-FROM ubuntu:26.04
+FROM ubuntu:24.04
 
 # Build arg: number of parallel compile jobs.
 # Default 8 balances speed vs memory on Strix Halo (16 cores, 128 GB UMA).
@@ -39,12 +38,15 @@ FROM ubuntu:26.04
 ARG MAX_JOBS=8
 
 # 1. Build + inference-runtime system deps (inference-only - no IB, no ffmpeg).
+# Ubuntu 24.04 ships Python 3.12 + CMake 3.28 natively, which are compatible
+# with vLLM's build system (unlike 26.04's CMake 4.x).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git \
       build-essential cmake ninja-build \
+      python3.12 python3.12-venv python3.12-dev \
       aria2 tar xz-utils \
-      libatomic1 libnuma-dev libgomp1 libelf1t64 \
+      libatomic1 libnuma-dev libgomp1 libelf1 \
       libdrm-dev zlib1g-dev libssl-dev \
       libgoogle-perftools4 \
       liblzma-dev \
@@ -62,7 +64,7 @@ RUN chmod +x /tmp/install_rocm_sdk.sh && \
     ROCM_MAJOR_VER=${ROCM_MAJOR_VER} GFX=${GFX} /tmp/install_rocm_sdk.sh && \
     rm /tmp/install_rocm_sdk.sh
 
-# 3. Python 3.12 venv via uv (Ubuntu 26.04 ships 3.14, no python3.12 apt pkg).
+# 3. Python 3.12 venv via uv (uses system Python 3.12).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
@@ -87,10 +89,6 @@ RUN uv pip install --pre torch torchvision torchaudio \
 WORKDIR /opt
 
 # 4b. vLLM native build tool deps.
-# CMake 4.x has known incompatibilities with ROCm/HIP detection:
-# LoadHIP.cmake sets HIP_FOUND incorrectly on cmake >= 4, causing
-# "Can't find CUDA or HIP installation" at CMakeLists.txt:147.
-# Pin to cmake < 4 until vLLM/PyTorch cmake configs support 4.x.
 RUN uv pip install --upgrade "cmake<4.0" ninja packaging wheel numpy \
       "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
 
