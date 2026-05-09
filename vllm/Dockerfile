@@ -151,10 +151,20 @@ ENV ROCM_HOME=/opt/rocm \
     CC=/opt/rocm/llvm/bin/clang \
     CXX=/opt/rocm/llvm/bin/clang++
 
-RUN export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
+RUN echo "=== Disk before vLLM build ===" && df -h . && \
+    rm -rf /opt/rocm/share/doc /opt/rocm/share/amd_smi \
+           /opt/rocm/lib/rocprofiler* /opt/rocm/lib/roctracer \
+           /opt/rocm/lib/rocm-smi /opt/rocm/lib/rocminfo \
+           /opt/rocm/lib/hip*test* /opt/rocm/lib/*_test* \
+           /root/.local/share/uv/cache && \
+    echo "=== After cleanup ===" && df -h . && \
+    export HIP_DEVICE_LIB_PATH=$(find /opt/rocm -type d -name bitcode -print -quit) && \
     echo "Building with bitcode: $HIP_DEVICE_LIB_PATH" && \
-    export CMAKE_ARGS="-DROCM_PATH=/opt/rocm -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
-    uv pip install --no-build-isolation --no-deps .
+    rm -rf /opt/vllm/build /opt/vllm/.deps && \
+    export CMAKE_ARGS="-DCMAKE_PREFIX_PATH=/opt/rocm -DROCM_PATH=/opt/rocm -DGPU_TARGETS=gfx1151 -DHIP_ARCHITECTURES=gfx1151" && \
+    SKBUILD_BUILD_VERBOSE=true \
+    uv pip install --no-build-isolation --no-deps . && \
+    echo "=== Disk after vLLM build ===" && df -h .
 
 # 8b. vLLM runtime dependencies.
 # vLLM declares deps as `dynamic` in pyproject.toml and loads them from
