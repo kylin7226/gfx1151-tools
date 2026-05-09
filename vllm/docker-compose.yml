@@ -42,31 +42,6 @@ services:
       HF_HOME: /models
       HF_HUB_OFFLINE: "1"
       HIP_VISIBLE_DEVICES: "0"
-      # Disable AITER's CDNA-only kernels (FP8 linear, fused MoE,
-      # RMSNorm)  -  documented freeze classes on gfx1151. The Strix
-      # patch bundle also fences these at the Python layer.
-      VLLM_ROCM_USE_AITER: "0"
-      # Force Triton AWQ kernel path (compressed-tensors -> AWQMarlin
-      # -> Conch). On the AWQMarlin-on-ROCm refactor (PR #36505) this
-      # delivered +57% prefill / +73% decode for AWQ on gfx1151.
-      VLLM_USE_TRITON_AWQ: "1"
-      # Avoid the EngineCore pickling regression that surfaces on
-      # cold-start with the v0.20.0 compile-cache pipeline.
-      VLLM_DISABLE_COMPILE_CACHE: "1"
-      # Avoid HSA scratch-reclaim segfault during AWQ tensor
-      # materialization (vllm#37151 still open as of 2026-04-26).
-      HSA_NO_SCRATCH_RECLAIM: "1"
-      # MIOpen has no precompiled solver DB for gfx1151. Fast-find avoids
-      # exhaustive-search hangs on ViT conv stems (vllm#37472).
-      MIOPEN_FIND_MODE: FAST
-      # NEVER set VLLM_LOGGING_LEVEL=DEBUG. vLLM's ir/op.py formats
-      # tensor arguments as strings at every op dispatch when DEBUG is
-      # on, which makes decode 20-100x slower (millions of Python
-      # iterations per forward pass).
-      # Skip memory profiling when a cached result exists (Patch 16).
-      # Cuts restart time from ~9 min to ~95 s when the cache hits.
-      VLLM_SKIP_MEMORY_PROFILING: "1"
-      VLLM_PROFILE_CACHE_DIR: "/root/.cache/vllm-profile"
     command:
       - vllm
       - serve
@@ -155,16 +130,6 @@ services:
       HF_HOME: /models
       HF_HUB_OFFLINE: "1"
       HIP_VISIBLE_DEVICES: "0"
-      VLLM_ROCM_USE_AITER: "0"
-      VLLM_USE_TRITON_AWQ: "1"
-      VLLM_DISABLE_COMPILE_CACHE: "1"
-      HSA_NO_SCRATCH_RECLAIM: "1"
-      HSA_OVERRIDE_GFX_VERSION: "11.5.1"
-      MIOPEN_FIND_MODE: FAST
-      FLASH_ATTENTION_TRITON_AMD_ENABLE: "TRUE"
-      VLLM_MAX_AUDIO_CLIP_FILESIZE_MB: "25"
-      VLLM_SKIP_MEMORY_PROFILING: "1"
-      VLLM_PROFILE_CACHE_DIR: "/root/.cache/vllm-profile"
     command:
       - vllm
       - serve
@@ -222,18 +187,6 @@ services:
       HF_HOME: /models
       HF_HUB_OFFLINE: "1"
       HIP_VISIBLE_DEVICES: "0"
-      # Disable AITER (CDNA-only kernels incompatible with gfx1151).
-      VLLM_ROCM_USE_AITER: "0"
-      # Force Triton AWQ kernel path for any AWQ models served via omni.
-      VLLM_USE_TRITON_AWQ: "1"
-      # Avoid EngineCore pickling regression on cold-start.
-      VLLM_DISABLE_COMPILE_CACHE: "1"
-      # Avoid HSA scratch-reclaim segfault during AWQ tensor load.
-      HSA_NO_SCRATCH_RECLAIM: "1"
-      # MIOpen fast-find avoids exhaustive-search hangs on conv stems.
-      MIOPEN_FIND_MODE: FAST
-      # Triton AMD FlashAttention (the only viable FA path on RDNA 3.5).
-      FLASH_ATTENTION_TRITON_AMD_ENABLE: "TRUE"
       # vllm-omni ROCm platform detection.
       VLLM_OMNI_TARGET_DEVICE: rocm
       # NEVER set VLLM_LOGGING_LEVEL=DEBUG (see vllm service comments).
