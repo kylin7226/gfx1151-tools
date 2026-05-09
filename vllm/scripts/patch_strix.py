@@ -1,7 +1,7 @@
 """
 Strix Halo (gfx1151) patch bundle for vLLM source builds.
 
-Applies 19 patches (numbered 1-19 sequentially) at build time to make
+Applies 20 patches (numbered 1-20 sequentially) at build time to make
 vLLM functional on RDNA 3.5 (gfx1151 / Strix Halo) where upstream
 support is incomplete.
 
@@ -401,6 +401,45 @@ except Exception:
             txt = mem_patch + txt
             p_rocm_plat.write_text(txt)
             print(" -> Patched vllm/platforms/rocm.py (ROCM-21812 APU VRAM Dynamic Margin)")
+
+    # Patch 20 (gfx1151 build fix): Fix HIP_FOUND detection in CMakeLists.txt.
+    #
+    # vLLM's CMakeLists.txt relies on HIP_FOUND being set by PyTorch's
+    # find_package(Torch), but on ROCm systems with CMake 3.31+, PyTorch's
+    # TorchConfig.cmake does NOT set HIP_FOUND. It enables the HIP language
+    # internally but leaves the top-level variable unset, causing the
+    # "Can't find CUDA or HIP installation" fatal error at line 147.
+    #
+    # Fix: insert a check_language(HIP) + enable_language(HIP) block right
+    # after find_package(Torch REQUIRED).
+    p_cmake = Path('CMakeLists.txt')
+    if p_cmake.exists():
+        txt = p_cmake.read_text()
+        hip_detection_fix = """
+
+# --- Strix Halo Patch 20: Explicit HIP detection after Torch find ---
+# PyTorch's find_package(Torch) on ROCm does not set HIP_FOUND on CMake 3.31+.
+# Explicitly detect and enable HIP here so the downstream logic works.
+if(NOT CUDA_FOUND)
+    include(CheckLanguage)
+    check_language(HIP)
+    if(CMAKE_HIP_COMPILER)
+        enable_language(HIP)
+        set(HIP_FOUND TRUE)
+        message(STATUS "Patch 20: Explicitly enabled HIP language")
+    endif()
+endif()
+# --- end Strix Halo Patch 20 ---
+"""
+        torch_find_marker = "find_package(Torch REQUIRED)"
+        if "Patch 20" not in txt and torch_find_marker in txt:
+            txt = txt.replace(
+                torch_find_marker,
+                torch_find_marker + hip_detection_fix,
+                1,
+            )
+            p_cmake.write_text(txt)
+            print(" -> Patched CMakeLists.txt (Patch 20: explicit HIP detection)")
 
     # Patch 12 (was 11): silence hipCtx* deprecation warnings in
     # csrc/cumem_allocator_compat.h. vLLM still uses hipCtxGetCurrent /
