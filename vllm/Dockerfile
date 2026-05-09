@@ -87,7 +87,11 @@ RUN uv pip install --pre torch torchvision torchaudio \
 WORKDIR /opt
 
 # 4b. vLLM native build tool deps.
-RUN uv pip install --upgrade cmake ninja packaging wheel numpy \
+# CMake 4.x has known incompatibilities with ROCm/HIP detection:
+# LoadHIP.cmake sets HIP_FOUND incorrectly on cmake >= 4, causing
+# "Can't find CUDA or HIP installation" at CMakeLists.txt:147.
+# Pin to cmake < 4 until vLLM/PyTorch cmake configs support 4.x.
+RUN uv pip install --upgrade "cmake<4.0" ninja packaging wheel numpy \
       "setuptools-scm>=8" "setuptools<80.0.0" scikit-build-core pybind11
 
 # 6. Conch Triton kernels - required by vLLM's AWQMarlin-on-ROCm path
